@@ -1,11 +1,10 @@
-# webhook_app.py - Полный рабочий файл с новогодним оформлением
+# webhook_app.py - Полный рабочий файл с новогодним оформлением (все тексты вынесены в MESSAGES)
 from flask import Flask, request, jsonify
 import asyncio
 import logging
 import os
 import queue
 import threading
-import time
 import random
 import string
 from datetime import datetime
@@ -21,11 +20,74 @@ if not BOT_TOKEN or not BOT_USERNAME:
     raise ValueError("BOT_TOKEN и BOT_USERNAME должны быть установлены в переменных окружения")
 
 RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL')
-WEBHOOK_HOST = RAILWAY_STATIC_URL or "https://example.com"  # замени на свой хост при необходимости
+WEBHOOK_HOST = RAILWAY_STATIC_URL or "https://example.com"
 if not WEBHOOK_HOST.startswith('http'):
     WEBHOOK_HOST = f"https://{WEBHOOK_HOST}"
 WEBHOOK_PATH = f'/webhook/{BOT_TOKEN}'
 WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
+
+# ---------- Новогодние тексты ----------
+MESSAGES = {
+    "start_welcome": (
+        "❄️✨ Добро пожаловать в волшебный мир Тайного Санты! ✨❄️\n\n"
+        "🎁 Здесь рождаются сюрпризы и тёплые истории под ёлкой.\n"
+        "🎄 Создайте игру, пригласите друзей и пусть начнётся праздник!\n\n"
+        "📜 Для списка команд отправьте /help — и волшебство начнётся 🎅"
+    ),
+    "help": (
+        "🎄 *Команды Тайного Санты* 🎄\n\n"
+        "/newgame — создать игру и зажечь ёлку\n"
+        "/join CODE — присоединиться к игре\n"
+        "/startgame — запустить жеребьёвку (только создатель)\n"
+        "/finishgame — завершить игру и поблагодарить всех\n"
+        "/wish TEXT — оставить свои праздничные пожелания\n"
+        "/mytarget — узнать, кому дарить подарок\n"
+        "/mygames — список ваших игр\n"
+        "/gameinfo CODE — подробности об игре\n"
+        "/players — кто уже у ёлки\n"
+        "/status — статус бота\n\n"
+        "🔔 Приглашение: https://t.me/{bot}?start=join_<КОД>"
+    ),
+    "newgame_prompt": "🎄 Отлично! Как назовём вашу праздничную игру? (например: «Ёлка друзей 2025»)",
+    "game_created": (
+        "🎉 Игра создана! 🎉\n\n"
+        "📝 Название: {name}\n"
+        "🔑 Код: {code}\n"
+        "👑 Создатель: {creator}\n"
+        "👥 Участников: {count}\n"
+        "📌 Ссылка для приглашения:\n{link}\n\n"
+        "Когда все соберутся у ёлки, запустите жеребьёвку: /startgame 🎅"
+    ),
+    "joined_game": "🎉 Вы присоединились к игре {name}! 🔔\nКод: {code}\nНапишите /wish чтобы оставить пожелания.",
+    "wish_saved": "📝 Пожелания сохранены! Спасибо — пусть Санта услышит ваши мечты 🎁",
+    "mytarget": "🎅 Ваш получатель: {name}\n\n🎁 Пожелания:\n{wishlist}\n\n✨ Сделайте подарок с теплом!",
+    "startgame_ok": "🎄 Жеребьёвка проведена — игра началась! Всем удачи и праздничного настроения 🎁",
+    "startgame_notify": "🎅 Хо-хо! Вы Тайный Санта для: {name}\n\n🎁 Пожелания:\n{wishlist}\n\nПусть ваш подарок будет волшебным ✨",
+    "finishgame": "✅ Игра '{name}' завершена! Спасибо всем за участие — праздник удался 🎉🎄",
+    "players_list_header": "👥 Участники игры '{name}':",
+    "gameinfo": (
+        "🎮 Информация об игре\n\n"
+        "📝 Название: {name}\n"
+        "🔑 Код: {code}\n"
+        "👑 Создатель: {creator}\n"
+        "📌 Статус: {status}\n"
+        "💰 Бюджет: {budget}\n"
+        "📅 Создана: {created}\n"
+        "👥 Участников: {count}\n\n"
+        "{extra}"
+    ),
+    "status": (
+        "📊 Статус бота:\n"
+        "🎮 Всего игр: {total}\n"
+        "🎁 Активных: {active}\n"
+        "⏳ Ожидающих: {waiting}\n"
+        "✅ Завершенных: {finished}\n"
+        "👤 Игроков: {players}\n"
+        "🔔 Очередь: {queue}"
+    ),
+    "unknown_command": "Я — бот Тайный Санта 🎅. Используйте /help для списка команд и подсказок.",
+    "code_hint": "🔍 Похоже на код игры.\nПрисоединиться: https://t.me/{bot}?start=join_{code}\nИнформация: /gameinfo {code}"
+}
 
 # ---------- Хранилище в памяти ----------
 games_db = {}           # {game_id: game_data}
@@ -49,12 +111,12 @@ class GameManager:
             'creator_id': creator_id,
             'creator_name': creator_name,
             'budget': budget or "🎁 Без ограничений",
-            'status': 'waiting',  # waiting | active | finished
+            'status': 'waiting',
             'created_at': datetime.now().isoformat(),
             'started_at': None,
             'participants': [creator_id],
-            'wishlists': {},  # {user_id: text}
-            'pairs': {},      # {santa_id: receiver_id}
+            'wishlists': {},
+            'pairs': {},
             'invite_link': invite_link
         }
         games_db[game_id] = game
@@ -128,7 +190,7 @@ class GameManager:
         if game['status'] == 'active':
             return False, "⏳ Игра уже началась, пожелания закрыты"
         game['wishlists'][user_id] = wishlist_text
-        return True, "📝 Ваши пожелания сохранены 🎄"
+        return True, MESSAGES["wish_saved"]
 
     @staticmethod
     def get_my_target(user_id):
@@ -168,7 +230,7 @@ class GameManager:
 # ---------- Очередь апдейтов ----------
 update_queue = queue.Queue()
 
-# ---------- Фоновый воркер (обрабатывает апдейты из очереди) ----------
+# ---------- Фоновый воркер ----------
 def background_worker():
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -178,7 +240,6 @@ def background_worker():
         dp = Dispatcher(bot, storage=MemoryStorage())
         pending_new_game = {}
 
-        # --- /start (поддерживает deep-link join_<code>) ---
         @dp.message_handler(commands=['start'])
         async def cmd_start(message: types.Message):
             args = message.get_args()
@@ -189,44 +250,22 @@ def background_worker():
                     g = games_db[code]
                     await bot.send_message(
                         message.chat.id,
-                        f"🎉 Вы присоединились к игре: {g['name']} 🎄\n🔑 Код: {code}\n✨ Укажите пожелания: /wish Текст"
+                        MESSAGES["joined_game"].format(name=g['name'], code=code)
                     )
                 else:
                     await bot.send_message(message.chat.id, res)
                 return
-            await bot.send_message(
-                message.chat.id,
-                "❄️✨ Добро пожаловать в игру Тайный Санта! ✨❄️\n\n"
-                "🎁 Дарите радость и сюрпризы!\n"
-                "📜 Используйте /help для списка команд 🎅"
-            )
+            await bot.send_message(message.chat.id, MESSAGES["start_welcome"])
 
-        # --- /help ---
         @dp.message_handler(commands=['help'])
         async def cmd_help(message: types.Message):
-            await bot.send_message(
-                message.chat.id,
-                "🎄 Команды Тайного Санты:\n"
-                "/newgame — создать игру\n"
-                "/join CODE — присоединиться\n"
-                "/startgame — начать игру (только создатель)\n"
-                "/finishgame — завершить игру (только создатель)\n"
-                "/wish TEXT — указать пожелания\n"
-                "/mytarget — узнать получателя\n"
-                "/mygames — список ваших игр\n"
-                "/gameinfo CODE — информация об игре\n"
-                "/players — участники текущей игры\n"
-                "/status — статус бота\n\n"
-                f"Приглашение: https://t.me/{BOT_USERNAME}?start=join_<КОД>"
-            )
+            await bot.send_message(message.chat.id, MESSAGES["help"].format(bot=BOT_USERNAME))
 
-        # --- /newgame ---
         @dp.message_handler(commands=['newgame'])
         async def cmd_newgame(message: types.Message):
             pending_new_game[message.from_user.id] = True
-            await bot.send_message(message.chat.id, "🎄 Введите название вашей праздничной игры:")
+            await bot.send_message(message.chat.id, MESSAGES["newgame_prompt"])
 
-        # --- /startgame ---
         @dp.message_handler(commands=['startgame'])
         async def cmd_startgame(message: types.Message):
             uid = message.from_user.id
@@ -242,14 +281,12 @@ def background_worker():
                     if target_info:
                         await bot.send_message(
                             pid,
-                            f"🎅 Игра '{g['name']}' началась!\nВы — Тайный Санта для: {target_info['name']}\n"
-                            f"🎁 Пожелания: {target_info['wishlist']}"
+                            MESSAGES["startgame_notify"].format(name=target_info['name'], wishlist=target_info['wishlist'])
                         )
-                await bot.send_message(message.chat.id, "🎄 Игра началась! Пары распределены 🎁")
+                await bot.send_message(message.chat.id, MESSAGES["startgame_ok"])
             else:
                 await bot.send_message(message.chat.id, res)
 
-        # --- /finishgame ---
         @dp.message_handler(commands=['finishgame'])
         async def cmd_finishgame(message: types.Message):
             uid = message.from_user.id
@@ -261,10 +298,9 @@ def background_worker():
             if ok:
                 g = games_db[current_game]
                 for pid in g['participants']:
-                    await bot.send_message(pid, f"✅ Игра '{g['name']}' завершена! Спасибо за участие 🎄✨")
+                    await bot.send_message(pid, MESSAGES["finishgame"].format(name=g['name']))
             await bot.send_message(message.chat.id, res)
 
-        # --- /join CODE ---
         @dp.message_handler(commands=['join'])
         async def cmd_join(message: types.Message):
             parts = message.text.strip().split()
@@ -275,14 +311,10 @@ def background_worker():
             ok, res = GameManager.join_game(code, message.from_user.id, message.from_user.first_name)
             if ok:
                 g = games_db[code]
-                await bot.send_message(
-                    message.chat.id,
-                    f"🎉 Вы присоединились к игре: {g['name']}\nСсылка для друзей:\n{g['invite_link']}"
-                )
+                await bot.send_message(message.chat.id, MESSAGES["joined_game"].format(name=g['name'], code=code))
             else:
                 await bot.send_message(message.chat.id, res)
 
-        # --- /players ---
         @dp.message_handler(commands=['players'])
         async def cmd_players(message: types.Message):
             uid = message.from_user.id
@@ -291,15 +323,14 @@ def background_worker():
                 await bot.send_message(message.chat.id, "❌ Вы не участвуете в игре.")
                 return
             g = games_db[current_game]
-            lines = [f"👥 Участники игры '{g['name']}':"]
+            lines = []
             for i, pid in enumerate(g['participants'], 1):
                 uname = players_db.get(pid, {}).get('username', 'Неизвестно')
                 creator_mark = " 👑" if pid == g['creator_id'] else ""
                 wishlist_mark = " 📝" if pid in g['wishlists'] else " ❔"
                 lines.append(f"{i}. {uname}{creator_mark}{wishlist_mark}")
-            await bot.send_message(message.chat.id, "\n".join(lines))
+            await bot.send_message(message.chat.id, MESSAGES["players_list_header"].format(name=g['name']) + "\n" + "\n".join(lines))
 
-        # --- /wish TEXT ---
         @dp.message_handler(commands=['wish'])
         async def cmd_wish(message: types.Message):
             text = message.text.strip()
@@ -310,34 +341,28 @@ def background_worker():
             ok, res = GameManager.set_wishlist(message.from_user.id, wishlist)
             await bot.send_message(message.chat.id, res)
 
-        # --- /mytarget ---
         @dp.message_handler(commands=['mytarget'])
         async def cmd_mytarget(message: types.Message):
             target, status = GameManager.get_my_target(message.from_user.id)
             if target:
-                await bot.send_message(
-                    message.chat.id,
-                    f"🎅 Ваш получатель: {target['name']}\n🎁 Пожелания:\n{target['wishlist']}"
-                )
+                await bot.send_message(message.chat.id, MESSAGES["mytarget"].format(name=target['name'], wishlist=target['wishlist']))
             else:
                 await bot.send_message(message.chat.id, status)
 
-        # --- /mygames ---
         @dp.message_handler(commands=['mygames'])
         async def cmd_mygames(message: types.Message):
             games_list = user_games.get(message.from_user.id, [])
             if not games_list:
                 await bot.send_message(message.chat.id, "📭 У вас пока нет игр.")
                 return
-            lines = ["📋 Ваши игры:"]
+            lines = []
             for gid in games_list:
                 g = games_db.get(gid)
                 if not g:
                     continue
                 lines.append(f"- {g['name']} (код: {gid}, статус: {g['status']})\n  Ссылка: {g['invite_link']}")
-            await bot.send_message(message.chat.id, "\n".join(lines))
+            await bot.send_message(message.chat.id, "📋 Ваши игры:\n" + "\n".join(lines))
 
-        # --- /gameinfo CODE ---
         @dp.message_handler(commands=['gameinfo'])
         async def cmd_gameinfo(message: types.Message):
             parts = message.text.strip().split()
@@ -355,25 +380,25 @@ def background_worker():
                 await bot.send_message(message.chat.id, f"❌ Игра с кодом {code} не найдена")
                 return
             status_map = {'waiting': 'Ожидание игроков', 'active': 'Игра началась', 'finished': 'Игра завершена'}
-            lines = [
-                f"🎮 Игра: {game['name']}",
-                f"🔑 Код: {game['id']}",
-                f"👑 Создатель: {game['creator_name']}",
-                f"📌 Статус: {status_map.get(game['status'], game['status'])}",
-                f"💰 Бюджет: {game['budget']}",
-                f"📅 Создана: {game['created_at'][:10]}",
-                f"👥 Участников: {len(game['participants_info'])}",
-            ]
+            extra = ""
             if game['status'] == 'waiting':
-                lines.append("Участники:")
+                extra_lines = []
                 for p in game['participants_info']:
-                    lines.append(f"- {p['name']} {'📝' if p['has_wishlist'] else '❔'}")
-                lines.append(f"Ссылка для присоединения:\nhttps://t.me/{BOT_USERNAME}?start=join_{game['id']}")
+                    extra_lines.append(f"- {p['name']} {'📝' if p['has_wishlist'] else '❔'}")
+                extra = "Участники:\n" + "\n".join(extra_lines) + f"\n\nСсылка для присоединения:\nhttps://t.me/{BOT_USERNAME}?start=join_{game['id']}"
             elif game['status'] == 'active':
-                lines.append("🎅 Игра началась! Узнайте своего получателя: /mytarget")
-            await bot.send_message(message.chat.id, "\n".join(lines))
+                extra = "🎅 Игра началась! Узнайте своего получателя: /mytarget"
+            await bot.send_message(message.chat.id, MESSAGES["gameinfo"].format(
+                name=game['name'],
+                code=game['id'],
+                creator=game['creator_name'],
+                status=status_map.get(game['status'], game['status']),
+                budget=game['budget'],
+                created=game['created_at'][:10],
+                count=len(game['participants_info']),
+                extra=extra
+            ))
 
-        # --- /status ---
         @dp.message_handler(commands=['status'])
         async def cmd_status(message: types.Message):
             total_games = len(games_db)
@@ -381,61 +406,37 @@ def background_worker():
             waiting_games = sum(1 for g in games_db.values() if g['status'] == 'waiting')
             finished_games = sum(1 for g in games_db.values() if g['status'] == 'finished')
             total_players = len(players_db)
-            await bot.send_message(
-                message.chat.id,
-                "📊 Статус бота:\n"
-                f"- Всего игр: {total_games}\n"
-                f"- Активных: {active_games}\n"
-                f"- Ожидающих: {waiting_games}\n"
-                f"- Завершенных: {finished_games}\n"
-                f"- Уникальных игроков: {total_players}\n"
-                f"- Очередь сообщений: {update_queue.qsize()}"
-            )
+            await bot.send_message(message.chat.id, MESSAGES["status"].format(
+                total=total_games, active=active_games, waiting=waiting_games,
+                finished=finished_games, players=total_players, queue=update_queue.qsize()
+            ))
 
-        # --- Обработка обычных сообщений (название игры / пожелания / код) ---
         @dp.message_handler()
         async def handle_all(message: types.Message):
             uid = message.from_user.id
             text = (message.text or "").strip()
 
-            # Если пользователь вводит название новой игры
             if uid in pending_new_game:
                 game = GameManager.create_game(uid, message.from_user.first_name, text)
                 del pending_new_game[uid]
-                await bot.send_message(
-                    message.chat.id,
-                    "🎉 Игра создана!\n"
-                    f"📝 Название: {game['name']}\n"
-                    f"🔑 Код: {game['id']}\n"
-                    f"📌 Ссылка для друзей:\n{game['invite_link']}\n\n"
-                    "Когда все присоединятся, запустите жеребьёвку: /startgame"
-                )
+                await bot.send_message(message.chat.id, MESSAGES["game_created"].format(
+                    name=game['name'], code=game['id'], creator=game['creator_name'],
+                    count=len(game['participants']), link=game['invite_link']
+                ))
                 return
 
-            # Если сообщение похоже на код игры (8 символов)
             if len(text) == 8 and text.isalnum():
-                await bot.send_message(
-                    message.chat.id,
-                    "🔍 Похоже на код игры.\n"
-                    f"Присоединиться: https://t.me/{BOT_USERNAME}?start=join_{text.upper()}\n"
-                    f"Информация: /gameinfo {text.upper()}"
-                )
+                await bot.send_message(message.chat.id, MESSAGES["code_hint"].format(bot=BOT_USERNAME, code=text.upper()))
                 return
 
-            # Если пользователь в игре и игра в статусе waiting — считаем это пожеланиями
             current_game = players_db.get(uid, {}).get('current_game')
             if current_game and games_db.get(current_game, {}).get('status') == 'waiting':
                 ok, res = GameManager.set_wishlist(uid, text)
                 await bot.send_message(message.chat.id, res)
                 return
 
-            # Иначе — подсказка
-            await bot.send_message(
-                message.chat.id,
-                "Я — бот Тайный Санта 🎅. Используйте /help для списка команд и подсказок."
-            )
+            await bot.send_message(message.chat.id, MESSAGES["unknown_command"])
 
-        # --- Цикл обработки апдейтов из очереди ---
         logger.info("Фоновый воркер запущен")
         try:
             while True:
@@ -447,7 +448,7 @@ def background_worker():
                         await dp.process_update(update)
                         logger.info(f"✅ Обработано update: {update_id}")
                     except Exception as e:
-                        logger.error(f"❌ Ошибка обработки update {update_id}: {e}")
+                        logger.exception("Ошибка обработки update %s: %s", update_id, e)
                     update_queue.task_done()
                 except queue.Empty:
                     await asyncio.sleep(0.1)
@@ -457,7 +458,6 @@ def background_worker():
             except Exception:
                 pass
 
-    # Запускаем асинхронный run() в отдельном event loop
     try:
         asyncio.run(run())
     except Exception as e:
@@ -468,7 +468,7 @@ worker_thread = threading.Thread(target=background_worker, daemon=True)
 worker_thread.start()
 logger.info("✅ Фоновый поток запущен")
 
-# ---------- Flask маршруты для вебхука и статуса ----------
+# ---------- Flask маршруты ----------
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
     try:
@@ -538,7 +538,6 @@ def status():
         'total_players': len(players_db)
     })
 
-# ---------- Статистика (HTML) ----------
 @app.route('/stats')
 def stats():
     active_games = sum(1 for g in games_db.values() if g['status'] == 'active')
