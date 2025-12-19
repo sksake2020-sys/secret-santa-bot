@@ -1,4 +1,4 @@
-# webhook_app.py - ПОЛНЫЙ ТАЙНЫЙ САНТА С ИСПРАВЛЕННЫМИ СЕССИЯМИ
+# webhook_app.py - ПОЛНЫЙ ТАЙНЫЙ САНТА (совместимая версия)
 from flask import Flask, request, jsonify
 import asyncio
 import logging
@@ -38,7 +38,7 @@ WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
 logger.info(f"BOT_TOKEN: {'установлен' if BOT_TOKEN else 'НЕ установлен'}")
 logger.info(f"WEBHOOK_HOST: {WEBHOOK_HOST}")
 
-# ============== ХРАНИЛИЩЕ ДАННЫХ (вместо БД) ==============
+# ============== ХРАНИЛИЩЕ ДАННЫХ ==============
 games_db = {}        # {game_id: game_data}
 players_db = {}      # {user_id: player_data}
 game_participants = {}  # {game_id: [user_id1, user_id2]}
@@ -247,13 +247,9 @@ def background_worker():
     """Фоновый воркер, который обрабатывает обновления из очереди"""
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
-    from aiogram.client.session.aiohttp import AiohttpSession
     
-    # Создаем сессию для бота
-    session = AiohttpSession()
-    
-    # Создаем бота для этого потока
-    worker_bot = Bot(token=BOT_TOKEN, session=session)
+    # Создаем бота для этого потока (старая версия aiogram)
+    worker_bot = Bot(token=BOT_TOKEN)
     Bot.set_current(worker_bot)
     worker_storage = MemoryStorage()
     worker_dp = Dispatcher(worker_bot, worker_storage)
@@ -917,11 +913,11 @@ def background_worker():
     async def handle_all_messages(message: types.Message):
         user_id = message.from_user.id
         
-        # Проверяем, может это пожелания?
+        # Если пользователь в игре и пишет обычное сообщение - считаем это пожеланиями
         if user_id in players_db and players_db[user_id].get('current_game'):
             current_game = players_db[user_id]['current_game']
             
-            # Если пользователь в игре, которая еще не началась - считаем это пожеланиями
+            # Если игра еще не началась
             if current_game in games_db and games_db[current_game]['status'] == 'waiting':
                 success, result = GameManager.set_wishlist(user_id, message.text)
                 
@@ -994,14 +990,8 @@ def background_worker():
     except Exception as e:
         logger.error(f"❌ Фоновый воркер остановлен: {e}")
     finally:
-        logger.info("🔒 Закрываю сессию фонового воркера...")
-        try:
-            loop.run_until_complete(session.close())
-        except Exception as e:
-            logger.error(f"❌ Ошибка закрытия сессии: {e}")
-        finally:
-            loop.close()
-            logger.info("✅ Фоновый воркер завершен")
+        logger.info("✅ Фоновый воркер завершен")
+        loop.close()
 
 # Запускаем фоновый воркер
 worker_thread = threading.Thread(target=background_worker, daemon=True)
@@ -1043,19 +1033,15 @@ def set_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        from aiogram.client.session.aiohttp import AiohttpSession
         
-        session = AiohttpSession()
+        # Простая версия для старого aiogram
+        temp_bot = Bot(token=BOT_TOKEN)
         
-        try:
-            temp_bot = Bot(token=BOT_TOKEN, session=session)
-            loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
-            
-            logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
-            return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
-        finally:
-            loop.run_until_complete(session.close())
-            loop.close()
+        loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
+        loop.close()
+        
+        logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
+        return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
             
     except Exception as e:
         logger.error(f"❌ Ошибка установки вебхука: {e}")
@@ -1069,18 +1055,12 @@ def delete_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        from aiogram.client.session.aiohttp import AiohttpSession
+        temp_bot = Bot(token=BOT_TOKEN)
         
-        session = AiohttpSession()
+        loop.run_until_complete(temp_bot.delete_webhook())
+        loop.close()
         
-        try:
-            temp_bot = Bot(token=BOT_TOKEN, session=session)
-            loop.run_until_complete(temp_bot.delete_webhook())
-            
-            return "✅ Вебхук удален!"
-        finally:
-            loop.run_until_complete(session.close())
-            loop.close()
+        return "✅ Вебхук удален!"
             
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
