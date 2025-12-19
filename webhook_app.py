@@ -1,4 +1,4 @@
-# webhook_app.py - ПОЛНЫЙ РАБОЧИЙ КОД С ОЧЕРЕДЬЮ
+# webhook_app.py - ПОЛНЫЙ РАБОЧИЙ КОД С ИСПРАВЛЕННЫМИ СЕССИЯМИ
 from flask import Flask, request, jsonify
 import asyncio
 import logging
@@ -6,6 +6,7 @@ import sys
 import os
 import queue
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -47,9 +48,13 @@ def background_worker():
     """Фоновый воркер, который обрабатывает обновления из очереди"""
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
+    from aiogram.client.session.aiohttp import AiohttpSession
+    
+    # Создаем сессию для бота
+    session = AiohttpSession()
     
     # Создаем бота для этого потока
-    worker_bot = Bot(token=BOT_TOKEN)
+    worker_bot = Bot(token=BOT_TOKEN, session=session)
     Bot.set_current(worker_bot)
     worker_storage = MemoryStorage()
     worker_dp = Dispatcher(worker_bot, worker_storage)
@@ -89,7 +94,7 @@ def background_worker():
     
     @worker_dp.message_handler(commands=['help'])
     async def handle_help(message: types.Message):
-        """Обработчик команды /help"""
+        """Обработчик команда /help"""
         help_text = """
 🎅 *Помощь по командам Тайного Санты*
 
@@ -155,39 +160,47 @@ def background_worker():
     @worker_dp.message_handler()
     async def handle_all_messages(message: types.Message):
         if message.text and not message.text.startswith('/'):
-            # Проверяем, может это пожелания участника
-            from database import SessionLocal, Participant, Game
-            
-            db = SessionLocal()
             try:
-                participant = db.query(Participant).join(Game).filter(
-                    Participant.user_id == message.from_user.id,
-                    Participant.wishlist.is_(None),
-                    Game.is_active == True,
-                    Game.is_started == False
-                ).first()
+                from database import SessionLocal, Participant, Game
                 
-                if participant:
-                    participant.wishlist = message.text
-                    db.commit()
-                    await worker_bot.send_message(
-                        chat_id=message.chat.id,
-                        text="✅ Ваши пожелания сохранены! Спасибо.\n\n"
-                             "Теперь дождитесь, пока создатель игры запустит распределение."
-                    )
-                else:
+                db = SessionLocal()
+                try:
+                    participant = db.query(Participant).join(Game).filter(
+                        Participant.user_id == message.from_user.id,
+                        Participant.wishlist.is_(None),
+                        Game.is_active == True,
+                        Game.is_started == False
+                    ).first()
+                    
+                    if participant:
+                        participant.wishlist = message.text
+                        db.commit()
+                        await worker_bot.send_message(
+                            chat_id=message.chat.id,
+                            text="✅ Ваши пожелания сохранены! Спасибо.\n\n"
+                                 "Теперь дождитесь, пока создатель игры запустит распределение."
+                        )
+                    else:
+                        await worker_bot.send_message(
+                            chat_id=message.chat.id,
+                            text=f"Вы сказали: {message.text}\n\nИспользуйте /help для списка команд."
+                        )
+                except Exception as e:
+                    logger.error(f"Ошибка обработки сообщения: {e}")
                     await worker_bot.send_message(
                         chat_id=message.chat.id,
                         text=f"Вы сказали: {message.text}\n\nИспользуйте /help для списка команд."
                     )
-            except Exception as e:
-                logger.error(f"Ошибка обработки сообщения: {e}")
+                finally:
+                    try:
+                        db.close()
+                    except:
+                        pass
+            except ImportError:
                 await worker_bot.send_message(
                     chat_id=message.chat.id,
                     text=f"Вы сказали: {message.text}\n\nИспользуйте /help для списка команд."
                 )
-            finally:
-                db.close()
         else:
             await worker_bot.send_message(
                 chat_id=message.chat.id,
@@ -200,9 +213,9 @@ def background_worker():
     @worker_dp.callback_query_handler(lambda c: c.data.startswith('join_game_'))
     async def process_join_game(callback_query: types.CallbackQuery):
         """Обработчик присоединения по инлайн-кнопке"""
-        from database import SessionLocal, Game, Participant
-        
         try:
+            from database import SessionLocal, Game, Participant
+            
             game_id = int(callback_query.data.split('_')[2])
             db = SessionLocal()
             
@@ -284,27 +297,40 @@ def background_worker():
     
     logger.info("✅ Фоновый воркер запущен")
     
-    # Бесконечный цикл обработки очереди
-    while True:
-        try:
-            update_data = update_queue.get(timeout=1)
-            update_id = update_data.get('update_id', 'unknown')
-            
+    try:
+        # Бесконечный цикл обработки очереди
+        while True:
             try:
-                update = types.Update(**update_data)
-                loop.run_until_complete(worker_dp.process_update(update))
-                logger.info(f"✅ Обработано update: {update_id}")
+                update_data = update_queue.get(timeout=1)
+                update_id = update_data.get('update_id', 'unknown')
+                
+                try:
+                    update = types.Update(**update_data)
+                    loop.run_until_complete(worker_dp.process_update(update))
+                    logger.info(f"✅ Обработано update: {update_id}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка обработки update {update_id}: {e}")
+                
+                update_queue.task_done()
+                
+            except queue.Empty:
+                continue  # Очередь пуста, ждем дальше
             except Exception as e:
-                logger.error(f"❌ Ошибка обработки update {update_id}: {e}")
-            
-            update_queue.task_done()
-            
-        except queue.Empty:
-            continue  # Очередь пуста, ждем дальше
+                logger.error(f"❌ Критическая ошибка воркера: {e}")
+                time.sleep(5)  # Пауза перед повторной попыткой
+                
+    except Exception as e:
+        logger.error(f"❌ Фоновый воркер остановлен: {e}")
+    finally:
+        # ВАЖНО: Закрываем сессию при завершении
+        logger.info("🔒 Закрываю сессию фонового воркера...")
+        try:
+            loop.run_until_complete(session.close())
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка воркера: {e}")
-            import time
-            time.sleep(5)  # Пауза перед повторной попыткой
+            logger.error(f"❌ Ошибка закрытия сессии: {e}")
+        finally:
+            loop.close()
+            logger.info("✅ Фоновый воркер завершен")
 
 # Запускаем фоновый воркер
 worker_thread = threading.Thread(target=background_worker, daemon=True)
@@ -342,13 +368,21 @@ def set_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        temp_bot = Bot(token=BOT_TOKEN)
+        from aiogram.client.session.aiohttp import AiohttpSession
         
-        loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
-        loop.close()
+        session = AiohttpSession()
         
-        logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
-        return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
+        try:
+            temp_bot = Bot(token=BOT_TOKEN, session=session)
+            loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
+            
+            logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
+            return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
+        finally:
+            # Закрываем сессию
+            loop.run_until_complete(session.close())
+            loop.close()
+            
     except Exception as e:
         logger.error(f"❌ Ошибка установки вебхука: {e}")
         return f"❌ Ошибка: {str(e)}"
@@ -361,12 +395,20 @@ def delete_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        temp_bot = Bot(token=BOT_TOKEN)
+        from aiogram.client.session.aiohttp import AiohttpSession
         
-        loop.run_until_complete(temp_bot.delete_webhook())
-        loop.close()
+        session = AiohttpSession()
         
-        return "✅ Вебхук удален!"
+        try:
+            temp_bot = Bot(token=BOT_TOKEN, session=session)
+            loop.run_until_complete(temp_bot.delete_webhook())
+            
+            return "✅ Вебхук удален!"
+        finally:
+            # Закрываем сессию
+            loop.run_until_complete(session.close())
+            loop.close()
+            
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
@@ -380,7 +422,7 @@ def status():
         'timestamp': datetime.datetime.now().isoformat(),
         'webhook_url': WEBHOOK_URL,
         'queue_size': update_queue.qsize(),
-        'background_worker': worker_thread.is_alive()
+        'background_worker': worker_thread.is_alive() if 'worker_thread' in locals() else False
     })
 
 # ============== ТЕСТОВЫЕ РОУТЫ ==============
