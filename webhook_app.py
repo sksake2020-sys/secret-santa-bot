@@ -256,29 +256,38 @@ async def process_game_wishlist(message: types.Message, state: FSMContext):
 # ============== СИНХРОННЫЕ FLASK РОУТЫ ==============
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
-    """Основной обработчик вебхуков от Telegram"""
+    """Упрощенный обработчик вебхуков"""
     try:
-        update = types.Update(**request.get_json())
+        update_data = request.get_json()
+        logger.info(f"Получен update: {update_data.get('update_id', 'unknown')}")
         
-        # Получаем текущий event loop или создаем новый
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Сохраняем update для обработки (например, в очередь)
+        # А пока просто логируем
+        if 'message' in update_data:
+            msg = update_data['message']
+            logger.info(f"Сообщение от {msg.get('from', {}).get('id')}: {msg.get('text', '')}")
         
-        # Создаем новую задачу в существующем loop
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Обрабатываем в фоне
+        import threading
+        def process_background():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                update = types.Update(**update_data)
+                loop.run_until_complete(dp.process_update(update))
+                loop.close()
+            except Exception as e:
+                logger.error(f"Фоновая обработка: {e}")
         
-        # Запускаем асинхронную функцию
-        loop.run_until_complete(dp.process_update(update))
-        return jsonify({'status': 'ok'})
+        thread = threading.Thread(target=process_background)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({'status': 'received'})
             
     except Exception as e:
         logger.error(f"Ошибка в webhook: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error'}), 500
 @app.route('/')
 def index():
     return "🎅 Бот 'Тайный Санта' работает на Railway!<br>Статус: ONLINE<br><a href='/set_webhook'>Установить вебхук</a>"
