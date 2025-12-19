@@ -1,4 +1,4 @@
-# webhook_app.py - ПОЛНЫЙ ТАЙНЫЙ САНТА (совместимая версия)
+# webhook_app.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 from flask import Flask, request, jsonify
 import asyncio
 import logging
@@ -214,30 +214,6 @@ class GameManager:
         
         game['participants_info'] = participants_info
         return game
-    
-    @staticmethod
-    def cleanup_old_games():
-        """Очистка старых завершенных игр (раз в день)"""
-        current_time = datetime.now()
-        games_to_remove = []
-        
-        for game_id, game in games_db.items():
-            if game['status'] == 'finished':
-                created_at = datetime.fromisoformat(game['created_at'])
-                if (current_time - created_at).days > 7:  # 7 дней
-                    games_to_remove.append(game_id)
-        
-        for game_id in games_to_remove:
-            # Удаляем из всех связанных структур
-            for user_id in game_participants.get(game_id, []):
-                if user_id in user_games and game_id in user_games[user_id]:
-                    user_games[user_id].remove(game_id)
-            
-            del games_db[game_id]
-            if game_id in game_participants:
-                del game_participants[game_id]
-            
-            logger.info(f"Очищена старая игра: {game_id}")
 
 # ============== ОЧЕРЕДЬ ДЛЯ ОБНОВЛЕНИЙ ==============
 update_queue = queue.Queue()
@@ -248,53 +224,18 @@ def background_worker():
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
     
-    # Создаем бота для этого потока (старая версия aiogram)
+    # Создаем бота для этого потока
     worker_bot = Bot(token=BOT_TOKEN)
     Bot.set_current(worker_bot)
     worker_storage = MemoryStorage()
     worker_dp = Dispatcher(worker_bot, worker_storage)
     
     # ============== ОБРАБОТЧИКИ КОМАНД ==============
-    @worker_dp.message_handler(commands=['start'])
+    @worker_dp.message_handler(commands=['start', 'help'])
     async def handle_start(message: types.Message):
-        """Обработчик команды /start"""
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row(
-            types.KeyboardButton("🎮 Создать игру"),
-            types.KeyboardButton("🎅 Присоединиться")
-        )
-        keyboard.row(
-            types.KeyboardButton("❓ Помощь"),
-            types.KeyboardButton("📋 Мои игры")
-        )
-        keyboard.row(
-            types.KeyboardButton("🎁 Мой получатель"),
-            types.KeyboardButton("📝 Мои пожелания")
-        )
-        
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=f"🎅 Привет, {message.from_user.first_name}! 👋\n\n"
-                 "Я — бот для организации *Тайного Санты*.\n\n"
-                 "✨ *Что я умею:*\n"
-                 "• Создавать игры с кодами-приглашениями\n"
-                 "• Автоматически распределять пары Сант\n"
-                 "• Хранить пожелания участников\n"
-                 "• Отправлять напоминания о подарках\n\n"
-                 "🎯 *Быстрый старт:*\n"
-                 "1. Нажми *«Создать игру»*\n"
-                 "2. Укажи бюджет и название\n"
-                 "3. Отправь друзьям код игры\n"
-                 "4. Запусти игру командой /start_game\n\n"
-                 "Или используй кнопки ниже ⬇️",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.message_handler(commands=['help'])
-    async def handle_help(message: types.Message):
-        """Обработчик команды /help"""
-        help_text = """
+        """Обработчик команд /start и /help"""
+        if message.text == '/help':
+            help_text = """
 🎅 *ТАЙНЫЙ САНТА - ПОЛНАЯ СПРАВКА*
 
 *Основные команды:*
@@ -302,41 +243,66 @@ def background_worker():
 /help - Показать эту справку
 
 *🎮 Управление игрой:*
-/new_game - Создать новую игру
-/my_games - Список ваших игр
-/game_info [код] - Информация об игре
-/start_game - Запустить игру (только создатель)
-/end_game - Завершить игру (только создатель)
+/newgame - Создать новую игру
+/mygames - Список ваших игр
+/gameinfo [код] - Информация об игре
+/startgame - Запустить игру (только создатель)
 
 *🤝 Участие в игре:*
 /join [код] - Присоединиться к игре
-/leave_game - Покинуть текущую игру
 /players - Список участников текущей игры
 
 *🎁 Подарки:*
 /wish [текст] - Указать пожелания
-/my_wishlist - Посмотреть мои пожелания
-/my_target - Кому я дарю подарок?
-/set_budget [сумма] - Установить бюджет (для создателя)
+/mywishlist - Посмотреть мои пожелания
+/mytarget - Кому я дарю подарок?
 
 *📊 Информация:*
 /status - Статус бота и статистика
-/clear_data - Очистить мои данные
 
 *💡 Примеры:*
-`/join ABC123XYZ` - присоединиться к игре
-`/wish Хочу новую книгу по программированию` - указать пожелания
-`/start_game` - начать игру (после присоединения всех)
-        """
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=help_text,
-            parse_mode="Markdown"
-        )
+/join ABC123XYZ - присоединиться к игре
+/wish Хочу книгу - указать пожелания
+/startgame - начать игру
+            """
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text=help_text,
+                parse_mode="Markdown"
+            )
+        else:
+            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            keyboard.row(
+                types.KeyboardButton("🎮 Создать игру"),
+                types.KeyboardButton("🎅 Присоединиться")
+            )
+            keyboard.row(
+                types.KeyboardButton("❓ Помощь"),
+                types.KeyboardButton("📋 Мои игры")
+            )
+            
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text=f"🎅 Привет, {message.from_user.first_name}! 👋\n\n"
+                     "Я — бот для организации *Тайного Санты*.\n\n"
+                     "✨ *Что я умею:*\n"
+                     "• Создавать игры с кодами-приглашениями\n"
+                     "• Автоматически распределять пары Сант\n"
+                     "• Хранить пожелания участников\n\n"
+                     "🎯 *Быстрый старт:*\n"
+                     "1. Нажми *«Создать игру»*\n"
+                     "2. Укажи название игры\n"
+                     "3. Отправь друзьям код игры\n"
+                     "4. Запусти игру командой /startgame\n\n"
+                     "Или используй кнопки ниже ⬇️",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
     
-    # ============== КНОПКИ ГЛАВНОГО МЕНЮ ==============
-    @worker_dp.message_handler(lambda message: message.text == "🎮 Создать игру")
-    async def handle_create_game_button(message: types.Message):
+    # ============== КОМАНДЫ ИГРЫ ==============
+    @worker_dp.message_handler(commands=['newgame', 'new_game'])
+    async def handle_new_game(message: types.Message):
+        """Обработчик создания новой игры"""
         await worker_bot.send_message(
             chat_id=message.chat.id,
             text="🎄 *Давайте создадим новую игру Тайного Санты!*\n\n"
@@ -345,168 +311,69 @@ def background_worker():
             parse_mode="Markdown"
         )
     
-    @worker_dp.message_handler(lambda message: message.text == "🎅 Присоединиться")
-    async def handle_join_button(message: types.Message):
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text="Для присоединения к игре:\n\n"
-                 "1. Получите *8-значный код* от друга\n"
-                 "   (например: ABC123XY)\n\n"
-                 "2. Используйте команду:\n"
-                 "   `/join КОД_ИГРЫ`\n\n"
-                 "Или нажмите на ссылку-приглашение, которую вам отправили.",
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.message_handler(lambda message: message.text == "📋 Мои игры")
-    async def handle_my_games_button(message: types.Message):
-        user_id = message.from_user.id
-        games_list = user_games.get(user_id, [])
-        
-        if not games_list:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ У вас пока нет игр.\n"
-                     "Создайте первую игру через меню или присоединитесь к существующей."
-            )
-            return
-        
-        response = "🎮 *Ваши игры:*\n\n"
-        for i, game_id in enumerate(games_list[:10], 1):
-            if game_id in games_db:
-                game = games_db[game_id]
-                status_emoji = {
-                    'waiting': '⏳',
-                    'active': '🎁',
-                    'finished': '✅'
-                }.get(game['status'], '❓')
-                
-                response += f"{i}. {status_emoji} *{game['name']}*\n"
-                response += f"   Код: `{game_id}`\n"
-                response += f"   Статус: {game['status']}\n"
-                response += f"   Участников: {len(game['participants'])}\n\n"
-        
-        if len(games_list) > 10:
-            response += f"... и еще {len(games_list) - 10} игр\n\n"
-        
-        response += "Для детальной информации:\n`/game_info КОД_ИГРЫ`"
-        
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=response,
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.message_handler(lambda message: message.text == "🎁 Мой получатель")
-    async def handle_my_target_button(message: types.Message):
+    @worker_dp.message_handler(commands=['startgame', 'start_game'])
+    async def handle_start_game_command(message: types.Message):
+        """Обработчик запуска игры"""
         user_id = message.from_user.id
         
-        target_info, status = GameManager.get_my_target(user_id)
-        
-        if target_info:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text=f"🎅 *Ваш получатель подарка:*\n\n"
-                     f"👤 *Имя:* {target_info['name']}\n"
-                     f"🆔 *ID:* `{target_info['id']}`\n\n"
-                     f"🎁 *Пожелания получателя:*\n"
-                     f"{target_info['wishlist']}\n\n"
-                     f"Удачи в выборе подарка! 🎄",
-                parse_mode="Markdown"
-            )
-        else:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text=f"❌ {status}"
-            )
-    
-    @worker_dp.message_handler(lambda message: message.text == "📝 Мои пожелания")
-    async def handle_my_wishlist_button(message: types.Message):
-        user_id = message.from_user.id
+        # Находим игру пользователя
         current_game = players_db.get(user_id, {}).get('current_game')
-        
-        if not current_game or current_game not in games_db:
+        if not current_game:
             await worker_bot.send_message(
                 chat_id=message.chat.id,
-                text="❌ Вы не участвуете в активной игре.\n"
-                     "Присоединитесь к игре или создайте новую."
+                text="❌ Вы не участвуете в игре.\n"
+                     "Сначала создайте игру (/newgame) или присоединитесь (/join)."
             )
             return
         
-        game = games_db[current_game]
-        wishlist = game['wishlists'].get(user_id, "❌ Пожелания не указаны")
+        success, result = GameManager.start_game(current_game, user_id)
         
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=f"📝 *Ваши текущие пожелания:*\n\n{wishlist}\n\n"
-                 f"*Игра:* {game['name']}\n"
-                 f"*Код игры:* `{game['id']}`\n\n"
-                 f"Изменить пожелания:\n"
-                 f"`/wish Ваши новые пожелания`",
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.message_handler(lambda message: message.text == "❓ Помощь")
-    async def handle_help_button(message: types.Message):
-        await handle_help(message)
-    
-    # ============== КОМАНДЫ БОТА ==============
-    @worker_dp.message_handler(commands=['new_game'])
-    async def handle_new_game(message: types.Message):
-        text = message.text.strip()
-        
-        if len(text) > 9:  # "/new_game" + пробел + название
-            game_name = text[10:]
+        if success:
+            # Получаем обновленную игру
+            game = games_db[current_game]
             
-            # Очищаем старые игры
-            GameManager.cleanup_old_games()
-            
-            # Создаем игру
-            game = GameManager.create_game(
-                message.from_user.id,
-                message.from_user.first_name,
-                game_name
-            )
-            
-            keyboard = types.InlineKeyboardMarkup()
-            invite_button = types.InlineKeyboardButton(
-                "🎅 Пригласить друзей",
-                url=f"https://t.me/share/url?url=Присоединяйся%20к%20моей%20игре%20Тайного%20Санты!%20Код:%20{game['id']}"
-            )
-            keyboard.add(invite_button)
-            
-            response = (
-                f"🎉 *Игра создана!*\n\n"
-                f"📝 *Название:* {game['name']}\n"
-                f"🔑 *Код игры:* `{game['id']}`\n"
-                f"👑 *Создатель:* {game['creator_name']}\n"
-                f"👥 *Участников:* 1\n"
-                f"📌 *Статус:* Ожидание игроков\n"
-                f"💰 *Бюджет:* {game['budget']}\n\n"
-                f"*Отправьте друзьям код игры:*\n"
-                f"`{game['id']}`\n\n"
-                f"Для присоединения нужно отправить:\n"
-                f"`/join {game['id']}`\n\n"
-                f"Когда все присоединятся, нажмите /start_game"
-            )
+            # Отправляем уведомления всем участникам
+            for participant_id in game['participants']:
+                try:
+                    target_info, _ = GameManager.get_my_target(participant_id)
+                    
+                    if target_info:
+                        await worker_bot.send_message(
+                            chat_id=participant_id,
+                            text=(
+                                f"🎉 *Игра началась!*\n\n"
+                                f"🎮 *Название игры:* {game['name']}\n\n"
+                                f"🎅 *Вы — Тайный Санта для:*\n"
+                                f"👤 *Имя:* {target_info['name']}\n"
+                                f"🆔 *ID:* `{target_info['id']}`\n\n"
+                                f"🎁 *Пожелания получателя:*\n"
+                                f"{target_info['wishlist']}\n\n"
+                                f"Удачи в выборе подарка! 🎄"
+                            ),
+                            parse_mode="Markdown"
+                        )
+                except Exception as e:
+                    logger.error(f"Не удалось отправить уведомление {participant_id}: {e}")
             
             await worker_bot.send_message(
                 chat_id=message.chat.id,
-                text=response,
-                reply_markup=keyboard,
+                text=(
+                    f"✅ *Игра началась!*\n\n"
+                    f"Все участники получили свои цели.\n"
+                    f"👥 Участников: {len(game['participants'])}\n\n"
+                    f"Проверить своего получателя: /mytarget"
+                ),
                 parse_mode="Markdown"
             )
         else:
             await worker_bot.send_message(
                 chat_id=message.chat.id,
-                text="❌ Укажите название игры:\n"
-                     "`/new_game Семейный Новый Год`\n\n"
-                     "Или используйте кнопку '🎮 Создать игру' в меню",
-                parse_mode="Markdown"
+                text=f"❌ {result}"
             )
     
     @worker_dp.message_handler(commands=['join'])
     async def handle_join_command(message: types.Message):
+        """Обработчик присоединения к игре"""
         text = message.text.strip()
         parts = text.split()
         
@@ -530,28 +397,21 @@ def background_worker():
             # Получаем информацию об игре
             game = GameManager.get_game_info(game_code)
             
-            keyboard = types.InlineKeyboardMarkup()
-            set_wishlist_button = types.InlineKeyboardButton(
-                "📝 Указать пожелания",
-                callback_data=f"set_wish_{game_code}"
-            )
-            keyboard.add(set_wishlist_button)
-            
             response = (
                 f"✅ *Вы присоединились к игре!*\n\n"
                 f"🎮 *Название:* {game['name']}\n"
                 f"🔑 *Код игры:* `{game_code}`\n"
                 f"👑 *Создатель:* {game['creator_name']}\n"
                 f"👥 *Участников:* {len(game['participants_info'])}\n"
-                f"📌 *Статус:* {game['status']}\n"
-                f"💰 *Бюджет:* {game['budget']}\n\n"
-                f"Нажмите кнопку ниже, чтобы указать ваши пожелания:"
+                f"📌 *Статус:* {game['status']}\n\n"
+                f"Теперь укажите ваши пожелания командой:\n"
+                f"`/wish Ваши пожелания здесь`\n\n"
+                f"Или просто напишите их в чат."
             )
             
             await worker_bot.send_message(
                 chat_id=message.chat.id,
                 text=response,
-                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
         else:
@@ -560,8 +420,98 @@ def background_worker():
                 text=f"❌ {result}"
             )
     
-    @worker_dp.message_handler(commands=['game_info'])
-    async def handle_game_info(message: types.Message):
+    @worker_dp.message_handler(commands=['wish'])
+    async def handle_wish_command(message: types.Message):
+        """Обработчик указания пожеланий"""
+        text = message.text.strip()
+        
+        if len(text) < 6:
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text="❌ Укажите ваши пожелания:\n"
+                     "`/wish Хочу новую книгу фэнтези`",
+                parse_mode="Markdown"
+            )
+            return
+        
+        wishlist_text = text[6:]
+        user_id = message.from_user.id
+        
+        success, result = GameManager.set_wishlist(user_id, wishlist_text)
+        
+        await worker_bot.send_message(
+            chat_id=message.chat.id,
+            text=f"✅ {result}" if success else f"❌ {result}",
+            parse_mode="Markdown"
+        )
+    
+    @worker_dp.message_handler(commands=['mytarget', 'my_target'])
+    async def handle_my_target_command(message: types.Message):
+        """Обработчик проверки получателя"""
+        user_id = message.from_user.id
+        
+        target_info, status = GameManager.get_my_target(user_id)
+        
+        if target_info:
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text=f"🎅 *Ваш получатель подарка:*\n\n"
+                     f"👤 *Имя:* {target_info['name']}\n"
+                     f"🆔 *ID:* `{target_info['id']}`\n\n"
+                     f"🎁 *Пожелания получателя:*\n"
+                     f"{target_info['wishlist']}\n\n"
+                     f"Удачи в выборе подарка! 🎄",
+                parse_mode="Markdown"
+            )
+        else:
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text=f"❌ {status}"
+            )
+    
+    @worker_dp.message_handler(commands=['mygames', 'my_games'])
+    async def handle_my_games_command(message: types.Message):
+        """Обработчик списка игр"""
+        user_id = message.from_user.id
+        games_list = user_games.get(user_id, [])
+        
+        if not games_list:
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text="❌ У вас пока нет игр.\n"
+                     "Создайте первую игру через /newgame или присоединитесь к существующей через /join."
+            )
+            return
+        
+        response = "🎮 *Ваши игры:*\n\n"
+        for i, game_id in enumerate(games_list[:10], 1):
+            if game_id in games_db:
+                game = games_db[game_id]
+                status_emoji = {
+                    'waiting': '⏳',
+                    'active': '🎁',
+                    'finished': '✅'
+                }.get(game['status'], '❓')
+                
+                response += f"{i}. {status_emoji} *{game['name']}*\n"
+                response += f"   Код: `{game_id}`\n"
+                response += f"   Статус: {game['status']}\n"
+                response += f"   Участников: {len(game['participants'])}\n\n"
+        
+        if len(games_list) > 10:
+            response += f"... и еще {len(games_list) - 10} игр\n\n"
+        
+        response += "Для детальной информации:\n`/gameinfo КОД_ИГРЫ`"
+        
+        await worker_bot.send_message(
+            chat_id=message.chat.id,
+            text=response,
+            parse_mode="Markdown"
+        )
+    
+    @worker_dp.message_handler(commands=['gameinfo', 'game_info'])
+    async def handle_game_info_command(message: types.Message):
+        """Обработчик информации об игре"""
         text = message.text.strip()
         parts = text.split()
         
@@ -574,7 +524,7 @@ def background_worker():
                 await worker_bot.send_message(
                     chat_id=message.chat.id,
                     text="❌ Вы не участвуете в игре.\n"
-                         "Укажите код игры:\n`/game_info ABC123XYZ`"
+                         "Укажите код игры:\n`/gameinfo ABC123XYZ`"
                 )
                 return
             
@@ -620,7 +570,7 @@ def background_worker():
         
         elif game['status'] == 'active':
             response += "🎅 *Игра началась!*\n"
-            response += "Узнайте своего получателя: /my_target"
+            response += "Узнайте своего получателя: /mytarget"
         
         await worker_bot.send_message(
             chat_id=message.chat.id,
@@ -628,90 +578,9 @@ def background_worker():
             parse_mode="Markdown"
         )
     
-    @worker_dp.message_handler(commands=['start_game'])
-    async def handle_start_game_command(message: types.Message):
-        user_id = message.from_user.id
-        
-        # Находим игру пользователя
-        current_game = players_db.get(user_id, {}).get('current_game')
-        if not current_game:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ Вы не участвуете в игре."
-            )
-            return
-        
-        success, result = GameManager.start_game(current_game, user_id)
-        
-        if success:
-            # Получаем обновленную игру
-            game = games_db[current_game]
-            
-            # Отправляем уведомления всем участникам
-            for participant_id in game['participants']:
-                try:
-                    target_info, _ = GameManager.get_my_target(participant_id)
-                    
-                    if target_info:
-                        await worker_bot.send_message(
-                            chat_id=participant_id,
-                            text=(
-                                f"🎉 *Игра началась!*\n\n"
-                                f"🎮 *Название игры:* {game['name']}\n\n"
-                                f"🎅 *Вы — Тайный Санта для:*\n"
-                                f"👤 *Имя:* {target_info['name']}\n"
-                                f"🆔 *ID:* `{target_info['id']}`\n\n"
-                                f"🎁 *Пожелания получателя:*\n"
-                                f"{target_info['wishlist']}\n\n"
-                                f"Удачи в выборе подарка! 🎄"
-                            ),
-                            parse_mode="Markdown"
-                        )
-                except Exception as e:
-                    logger.error(f"Не удалось отправить уведомление {participant_id}: {e}")
-            
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text=(
-                    f"✅ *Игра началась!*\n\n"
-                    f"Все участники получили свои цели.\n"
-                    f"👥 Участников: {len(game['participants'])}\n\n"
-                    f"Проверить своего получателя: /my_target"
-                ),
-                parse_mode="Markdown"
-            )
-        else:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text=f"❌ {result}"
-            )
-    
-    @worker_dp.message_handler(commands=['wish'])
-    async def handle_wish_command(message: types.Message):
-        text = message.text.strip()
-        
-        if len(text) < 6:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ Укажите ваши пожелания:\n"
-                     "`/wish Хочу новую книгу фэнтези`",
-                parse_mode="Markdown"
-            )
-            return
-        
-        wishlist_text = text[6:]
-        user_id = message.from_user.id
-        
-        success, result = GameManager.set_wishlist(user_id, wishlist_text)
-        
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=f"✅ {result}" if success else f"❌ {result}",
-            parse_mode="Markdown"
-        )
-    
     @worker_dp.message_handler(commands=['players'])
     async def handle_players_command(message: types.Message):
+        """Обработчик списка участников"""
         user_id = message.from_user.id
         current_game = players_db.get(user_id, {}).get('current_game')
         
@@ -753,6 +622,7 @@ def background_worker():
     
     @worker_dp.message_handler(commands=['status'])
     async def handle_status_command(message: types.Message):
+        """Обработчик статуса бота"""
         total_games = len(games_db)
         active_games = sum(1 for g in games_db.values() if g['status'] == 'active')
         waiting_games = sum(1 for g in games_db.values() if g['status'] == 'waiting')
@@ -775,157 +645,78 @@ def background_worker():
             parse_mode="Markdown"
         )
     
-    @worker_dp.message_handler(commands=['clear_data'])
-    async def handle_clear_data(message: types.Message):
-        keyboard = types.InlineKeyboardMarkup()
-        confirm_button = types.InlineKeyboardButton(
-            "✅ Да, очистить мои данные",
-            callback_data="clear_data_confirm"
-        )
-        cancel_button = types.InlineKeyboardButton(
-            "❌ Нет, отменить",
-            callback_data="clear_data_cancel"
-        )
-        keyboard.add(confirm_button, cancel_button)
-        
+    # ============== КНОПКИ ГЛАВНОГО МЕНЮ ==============
+    @worker_dp.message_handler(lambda message: message.text == "🎮 Создать игру")
+    async def handle_create_game_button(message: types.Message):
+        await handle_new_game(message)
+    
+    @worker_dp.message_handler(lambda message: message.text == "🎅 Присоединиться")
+    async def handle_join_button(message: types.Message):
         await worker_bot.send_message(
             chat_id=message.chat.id,
-            text="⚠️ *Внимание!*\n\n"
-                 "Вы собираетесь удалить ВСЕ ваши данные:\n"
-                 "• Информацию о вас как игроке\n"
-                 "• Ваши пожелания во всех играх\n"
-                 "• Список ваших игр\n\n"
-                 "Это действие *нельзя отменить*!\n"
-                 "Вы уверены?",
-            reply_markup=keyboard,
+            text="Для присоединения к игре:\n\n"
+                 "1. Получите *8-значный код* от друга\n"
+                 "   (например: ABC123XY)\n\n"
+                 "2. Используйте команду:\n"
+                 "   `/join КОД_ИГРЫ`\n\n"
+                 "Или нажмите на ссылку-приглашение, которую вам отправили.",
             parse_mode="Markdown"
         )
     
-    @worker_dp.message_handler(commands=['my_games'])
-    async def handle_my_games_command(message: types.Message):
-        await handle_my_games_button(message)
+    @worker_dp.message_handler(lambda message: message.text == "📋 Мои игры")
+    async def handle_my_games_button(message: types.Message):
+        await handle_my_games_command(message)
     
-    @worker_dp.message_handler(commands=['my_target'])
-    async def handle_my_target_command(message: types.Message):
-        await handle_my_target_button(message)
+    @worker_dp.message_handler(lambda message: message.text == "❓ Помощь")
+    async def handle_help_button(message: types.Message):
+        await handle_start(message)  # /help обрабатывается в handle_start
     
-    @worker_dp.message_handler(commands=['set_budget'])
-    async def handle_set_budget(message: types.Message):
-        text = message.text.strip()
-        parts = text.split()
-        
-        if len(parts) < 2:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ Укажите бюджет:\n"
-                     "`/set_budget 1000 руб`\n"
-                     "`/set_budget Не ограничен`"
-            )
-            return
-        
-        user_id = message.from_user.id
-        current_game = players_db.get(user_id, {}).get('current_game')
-        
-        if not current_game or current_game not in games_db:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ Вы не создатель игры."
-            )
-            return
-        
-        game = games_db[current_game]
-        if game['creator_id'] != user_id:
-            await worker_bot.send_message(
-                chat_id=message.chat.id,
-                text="❌ Только создатель игры может менять бюджет."
-            )
-            return
-        
-        new_budget = ' '.join(parts[1:])
-        game['budget'] = new_budget
-        
-        await worker_bot.send_message(
-            chat_id=message.chat.id,
-            text=f"✅ Бюджет обновлен:\n{new_budget}"
-        )
-    
-    # ============== ОБРАБОТКА CALLBACK-QUERY ==============
-    @worker_dp.callback_query_handler(lambda c: c.data.startswith('set_wish_'))
-    async def process_set_wish(callback_query: types.CallbackQuery):
-        game_code = callback_query.data.split('_')[2]
-        await worker_bot.answer_callback_query(callback_query.id)
-        
-        await worker_bot.send_message(
-            callback_query.from_user.id,
-            f"📝 *Укажите ваши пожелания для подарка:*\n\n"
-            f"Напишите сообщение с вашими пожеланиями.\n"
-            f"Что вам нравится? Что бы вы хотели получить?\n\n"
-            f"*Пример:* Хочу книгу по программированию на Python\n\n"
-            f"Или используйте команду:\n"
-            f"`/wish Ваши пожелания здесь`",
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.callback_query_handler(lambda c: c.data == 'clear_data_confirm')
-    async def process_clear_data_confirm(callback_query: types.CallbackQuery):
-        user_id = callback_query.from_user.id
-        
-        # Удаляем пользователя из всех игр
-        if user_id in user_games:
-            for game_id in user_games[user_id]:
-                if game_id in games_db:
-                    game = games_db[game_id]
-                    if user_id in game['participants']:
-                        game['participants'].remove(user_id)
-                    if user_id in game['wishlists']:
-                        del game['wishlists'][user_id]
-                    if user_id in game['pairs']:
-                        del game['pairs'][user_id]
-            
-            del user_games[user_id]
-        
-        if user_id in players_db:
-            del players_db[user_id]
-        
-        await worker_bot.answer_callback_query(
-            callback_query.id,
-            "✅ Все ваши данные удалены!",
-            show_alert=True
-        )
-        
-        await worker_bot.send_message(
-            callback_query.from_user.id,
-            "🧹 *Все ваши данные удалены.*\n\n"
-            "Вы можете начать заново с команды /start",
-            parse_mode="Markdown"
-        )
-    
-    @worker_dp.callback_query_handler(lambda c: c.data == 'clear_data_cancel')
-    async def process_clear_data_cancel(callback_query: types.CallbackQuery):
-        await worker_bot.answer_callback_query(
-            callback_query.id,
-            "❌ Удаление данных отменено.",
-            show_alert=True
-        )
-    
-    # ============== ОБРАБОТКА ВСЕХ ОСТАЛЬНЫХ СООБЩЕНИЙ ==============
+    # ============== ОБРАБОТКА ОСТАЛЬНЫХ СООБЩЕНИЙ ==============
     @worker_dp.message_handler()
     async def handle_all_messages(message: types.Message):
+        """Обработчик всех остальных сообщений"""
         user_id = message.from_user.id
+        text = message.text.strip()
         
-        # Если пользователь в игре и пишет обычное сообщение - считаем это пожеланиями
+        # Если пользователь только что создал игру - это название игры
+        if user_id in players_db and user_id not in user_games:
+            # Создаем игру с введенным названием
+            game = GameManager.create_game(user_id, message.from_user.first_name, text)
+            
+            response = (
+                f"🎉 *Игра создана!*\n\n"
+                f"📝 *Название:* {game['name']}\n"
+                f"🔑 *Код игры:* `{game['id']}`\n"
+                f"👑 *Создатель:* {game['creator_name']}\n"
+                f"👥 *Участников:* 1\n"
+                f"📌 *Статус:* Ожидание игроков\n"
+                f"💰 *Бюджет:* {game['budget']}\n\n"
+                f"*Отправьте друзьям код игры:*\n"
+                f"`{game['id']}`\n\n"
+                f"Для присоединения нужно отправить:\n"
+                f"`/join {game['id']}`\n\n"
+                f"Когда все присоединятся, нажмите /startgame"
+            )
+            
+            await worker_bot.send_message(
+                chat_id=message.chat.id,
+                text=response,
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Если пользователь в игре и игра еще не началась - это пожелания
         if user_id in players_db and players_db[user_id].get('current_game'):
             current_game = players_db[user_id]['current_game']
             
-            # Если игра еще не началась
             if current_game in games_db and games_db[current_game]['status'] == 'waiting':
-                success, result = GameManager.set_wishlist(user_id, message.text)
+                success, result = GameManager.set_wishlist(user_id, text)
                 
                 if success:
                     await worker_bot.send_message(
                         chat_id=message.chat.id,
                         text=f"✅ {result}\n\n"
-                             f"*Ваши пожелания:*\n{message.text}\n\n"
+                             f"*Ваши пожелания:*\n{text}\n\n"
                              f"Изменить пожелания можно командой:\n"
                              f"`/wish Новые пожелания`",
                         parse_mode="Markdown"
@@ -938,18 +729,18 @@ def background_worker():
                 return
         
         # Если сообщение похоже на код игры (8 символов)
-        text = message.text.strip().upper()
-        if len(text) == 8 and all(c.isalnum() for c in text):
+        if len(text) == 8 and all(c.isalnum() for c in text.upper()):
             await worker_bot.send_message(
                 chat_id=message.chat.id,
-                text=f"🔍 *Обнаружен код игры:* `{text}`\n\n"
+                text=f"🔍 *Обнаружен код игры:* `{text.upper()}`\n\n"
                      f"Присоединиться к игре:\n"
-                     f"`/join {text}`\n\n"
+                     f"`/join {text.upper()}`\n\n"
                      f"Или посмотреть информацию об игре:\n"
-                     f"`/game_info {text}`",
+                     f"`/gameinfo {text.upper()}`",
                 parse_mode="Markdown"
             )
         else:
+            # Если это обычное сообщение и мы не знаем что делать
             await worker_bot.send_message(
                 chat_id=message.chat.id,
                 text=f"👋 Привет, {message.from_user.first_name}!\n\n"
@@ -1033,8 +824,6 @@ def set_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        
-        # Простая версия для старого aiogram
         temp_bot = Bot(token=BOT_TOKEN)
         
         loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
