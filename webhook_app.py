@@ -27,7 +27,7 @@ if RAILWAY_STATIC_URL:
 else:
     # После деплоя Railway даст URL типа: ваш-проект.up.railway.app
     # Временно оставьте так, потом замените на реальный
-    WEBHOOK_HOST = "https://ваш-проект.up.railway.app"
+    WEBHOOK_HOST = "https://web-production-1a5d8.up.railway.app"
 
 WEBHOOK_PATH = f'/webhook/{BOT_TOKEN}'
 WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
