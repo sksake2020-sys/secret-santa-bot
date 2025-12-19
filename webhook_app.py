@@ -48,7 +48,8 @@ def background_worker():
     """Фоновый воркер, который обрабатывает обновления из очереди"""
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
-    from aiogram.client.session.aiohttp import AiohttpSession
+    # В aiogram 2.x сессия создается автоматически, не нужно импортировать AiohttpSession
+# Просто создаем бота как обычно
     
     # Создаем сессию для бота
     session = AiohttpSession()
@@ -321,16 +322,6 @@ def background_worker():
                 
     except Exception as e:
         logger.error(f"❌ Фоновый воркер остановлен: {e}")
-    finally:
-        # ВАЖНО: Закрываем сессию при завершении
-        logger.info("🔒 Закрываю сессию фонового воркера...")
-        try:
-            loop.run_until_complete(session.close())
-        except Exception as e:
-            logger.error(f"❌ Ошибка закрытия сессии: {e}")
-        finally:
-            loop.close()
-            logger.info("✅ Фоновый воркер завершен")
 
 # Запускаем фоновый воркер
 worker_thread = threading.Thread(target=background_worker, daemon=True)
@@ -368,19 +359,14 @@ def set_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        from aiogram.client.session.aiohttp import AiohttpSession
-        
-        session = AiohttpSession()
         
         try:
-            temp_bot = Bot(token=BOT_TOKEN, session=session)
+            temp_bot = Bot(token=BOT_TOKEN)
             loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
             
             logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
             return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
         finally:
-            # Закрываем сессию
-            loop.run_until_complete(session.close())
             loop.close()
             
     except Exception as e:
@@ -395,18 +381,13 @@ def delete_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        from aiogram.client.session.aiohttp import AiohttpSession
-        
-        session = AiohttpSession()
         
         try:
-            temp_bot = Bot(token=BOT_TOKEN, session=session)
+            temp_bot = Bot(token=BOT_TOKEN)
             loop.run_until_complete(temp_bot.delete_webhook())
             
             return "✅ Вебхук удален!"
         finally:
-            # Закрываем сессию
-            loop.run_until_complete(session.close())
             loop.close()
             
     except Exception as e:
