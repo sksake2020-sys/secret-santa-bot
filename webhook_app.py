@@ -1,4 +1,4 @@
-# webhook_app.py - ПРОСТОЙ РАБОЧИЙ ВЕБХУК
+# webhook_app.py - ИСПРАВЛЕННЫЙ ВЕБХУК
 from flask import Flask, request, jsonify
 import asyncio
 import logging
@@ -7,6 +7,9 @@ import os
 import queue
 import threading
 import time
+import aiohttp
+import signal
+import atexit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,29 +32,70 @@ logger.info(f"WEBHOOK_HOST: {WEBHOOK_HOST}")
 # ============== ОЧЕРЕДЬ ==============
 update_queue = queue.Queue()
 
+# ============== ГЛОБАЛЬНЫЕ РЕСУРСЫ ==============
+worker_running = True
+bot_instance = None
+dp_instance = None
+event_loop = None
+
+# ============== КОРРЕКТНОЕ ЗАВЕРШЕНИЕ ==============
+def cleanup():
+    """Корректное завершение всех ресурсов"""
+    global worker_running, bot_instance, dp_instance, event_loop
+    
+    logger.info("🔄 Начинаю cleanup...")
+    worker_running = False
+    
+    # Закрываем бота
+    if bot_instance:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(bot_instance.close())
+            loop.close()
+            logger.info("✅ Бот закрыт")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при закрытии бота: {e}")
+    
+    # Очищаем очередь
+    try:
+        while not update_queue.empty():
+            update_queue.get_nowait()
+            update_queue.task_done()
+        logger.info("✅ Очередь очищена")
+    except:
+        pass
+    
+    logger.info("✅ Cleanup завершен")
+
+# Регистрируем cleanup
+atexit.register(cleanup)
+
 # ============== ФОНОВЫЙ ОБРАБОТЧИК ==============
 def background_worker():
     """Фоновый обработчик сообщений"""
     from aiogram import Bot, Dispatcher, types
     from aiogram.contrib.fsm_storage.memory import MemoryStorage
     
+    global worker_running, bot_instance, dp_instance, event_loop
+    
     # Создаем бота
-    worker_bot = Bot(token=BOT_TOKEN)
-    Bot.set_current(worker_bot)
+    bot_instance = Bot(token=BOT_TOKEN)
+    Bot.set_current(bot_instance)
     worker_storage = MemoryStorage()
-    worker_dp = Dispatcher(worker_bot, worker_storage)
+    dp_instance = Dispatcher(bot_instance, worker_storage)
     
     # ============== ОБРАБОТЧИКИ ==============
-    @worker_dp.message_handler(commands=['start'])
+    @dp_instance.message_handler(commands=['start'])
     async def handle_start(message: types.Message):
-        await worker_bot.send_message(
+        await bot_instance.send_message(
             chat_id=message.chat.id,
             text=f"🎅 Привет, {message.from_user.first_name}!\n\n"
                  "Я — бот для Тайного Санты.\n"
                  "Используй /help для списка команд."
         )
     
-    @worker_dp.message_handler(commands=['help'])
+    @dp_instance.message_handler(commands=['help'])
     async def handle_help(message: types.Message):
         help_text = """
 🎅 Помощь:
@@ -61,51 +105,51 @@ def background_worker():
 /join [код] - присоединиться
 /my_target - мой получатель
         """
-        await worker_bot.send_message(
+        await bot_instance.send_message(
             chat_id=message.chat.id,
             text=help_text
         )
     
-    @worker_dp.message_handler(commands=['new_game'])
+    @dp_instance.message_handler(commands=['new_game'])
     async def handle_new_game(message: types.Message):
-        await worker_bot.send_message(
+        await bot_instance.send_message(
             chat_id=message.chat.id,
             text="Создание игры... (в разработке)"
         )
     
-    @worker_dp.message_handler(commands=['my_target'])
+    @dp_instance.message_handler(commands=['my_target'])
     async def handle_my_target(message: types.Message):
-        await worker_bot.send_message(
+        await bot_instance.send_message(
             chat_id=message.chat.id,
             text="Ваш получатель... (в разработке)"
         )
     
-    @worker_dp.message_handler()
+    @dp_instance.message_handler()
     async def handle_all_messages(message: types.Message):
         if message.text:
-            await worker_bot.send_message(
+            await bot_instance.send_message(
                 chat_id=message.chat.id,
                 text=f"Вы сказали: {message.text}\nИспользуйте /help"
             )
     
     # ============== ЗАПУСК ЦИКЛА ==============
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(event_loop)
     
     logger.info("✅ Фоновый воркер запущен")
     
     try:
-        while True:
+        while worker_running:
             try:
                 update_data = update_queue.get(timeout=1)
                 update_id = update_data.get('update_id', 'unknown')
                 
                 try:
                     update = types.Update(**update_data)
-                    loop.run_until_complete(worker_dp.process_update(update))
+                    event_loop.run_until_complete(dp_instance.process_update(update))
                     logger.info(f"✅ Обработано: {update_id}")
                 except Exception as e:
-                    logger.error(f"❌ Ошибка: {e}")
+                    logger.error(f"❌ Ошибка обработки: {e}")
                 
                 update_queue.task_done()
                 
@@ -118,7 +162,16 @@ def background_worker():
     except Exception as e:
         logger.error(f"❌ Воркер остановлен: {e}")
     finally:
-        loop.close()
+        # Корректное завершение
+        try:
+            if event_loop and not event_loop.is_closed():
+                # Закрываем сессии внутри event loop
+                event_loop.run_until_complete(bot_instance.session.close())
+                event_loop.close()
+                logger.info("✅ Event loop закрыт")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при закрытии event loop: {e}")
+        
         logger.info("✅ Воркер завершен")
 
 # Запускаем фоновый поток
@@ -134,6 +187,11 @@ def webhook():
         update_data = request.get_json()
         update_id = update_data.get('update_id', 'unknown')
         
+        # Проверяем, что воркер жив
+        if not worker_thread.is_alive():
+            logger.error("❌ Воркер не работает!")
+            return jsonify({'status': 'worker_down'}), 500
+        
         # Добавляем в очередь
         update_queue.put(update_data)
         
@@ -141,7 +199,7 @@ def webhook():
         return jsonify({'status': 'ok', 'update_id': update_id})
             
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка вебхука: {e}")
         return jsonify({'status': 'error'}), 500
 
 @app.route('/')
@@ -156,15 +214,19 @@ def set_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        temp_bot = Bot(token=BOT_TOKEN)
         
-        loop.run_until_complete(temp_bot.set_webhook(WEBHOOK_URL))
+        # Используем контекстный менеджер для бота
+        async def set_wh():
+            async with Bot(token=BOT_TOKEN) as temp_bot:
+                await temp_bot.set_webhook(WEBHOOK_URL)
+        
+        loop.run_until_complete(set_wh())
         loop.close()
         
         logger.info(f"✅ Вебхук установлен")
         return f"✅ Вебхук установлен!<br>{WEBHOOK_URL}"
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка установки вебхука: {e}")
         return f"❌ Ошибка: {str(e)}"
 
 @app.route('/delete_webhook')
@@ -175,13 +237,19 @@ def delete_webhook():
         asyncio.set_event_loop(loop)
         
         from aiogram import Bot
-        temp_bot = Bot(token=BOT_TOKEN)
         
-        loop.run_until_complete(temp_bot.delete_webhook())
+        # Используем контекстный менеджер
+        async def delete_wh():
+            async with Bot(token=BOT_TOKEN) as temp_bot:
+                await temp_bot.delete_webhook()
+                await temp_bot.close()
+        
+        loop.run_until_complete(delete_wh())
         loop.close()
         
         return "✅ Вебхук удален!"
     except Exception as e:
+        logger.error(f"❌ Ошибка удаления вебхука: {e}")
         return f"❌ Ошибка: {str(e)}"
 
 @app.route('/status')
@@ -192,11 +260,34 @@ def status():
         'status': 'online',
         'time': datetime.datetime.now().isoformat(),
         'queue': update_queue.qsize(),
-        'worker': worker_thread.is_alive()
+        'worker_alive': worker_thread.is_alive(),
+        'worker_running': worker_running
     })
+
+@app.route('/health')
+def health():
+    """Health check для Railway"""
+    if worker_thread.is_alive():
+        return jsonify({'status': 'healthy'}), 200
+    else:
+        return jsonify({'status': 'unhealthy'}), 500
+
+# ============== ОБРАБОТЧИК СИГНАЛОВ ==============
+def handle_shutdown(signum, frame):
+    """Обработчик сигналов завершения"""
+    logger.info(f"Получен сигнал {signum}, завершаю работу...")
+    cleanup()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT, handle_shutdown)
 
 # ============== ЗАПУСК ==============
 if __name__ == '__main__':
     print("🚀 Бот запускается...")
+    
+    # Регистрируем cleanup при выходе
+    atexit.register(cleanup)
+    
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
