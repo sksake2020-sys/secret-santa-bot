@@ -273,7 +273,7 @@ def webhook():
             asyncio.set_event_loop(loop)
         
         # Запускаем асинхронную функцию
-        loop.run_until_complete(dp.process_update(bot=bot, update=update))
+        loop.run_until_complete(dp.process_update(update))
         return jsonify({'status': 'ok'})
             
     except Exception as e:
