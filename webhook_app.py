@@ -36,9 +36,8 @@ WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
 
 logger.info(f"BOT_TOKEN: {'установлен' if BOT_TOKEN else 'НЕ установлен'}")
 logger.info(f"WEBHOOK_HOST: {WEBHOOK_HOST}")
-# ===================================================
 
-# ИМПОРТЫ ДЛЯ AIOGRAM 2.25.1
+# ============== ИНИЦИАЛИЗАЦИЯ AIOGRAM ==============
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -50,6 +49,9 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
+# КРИТИЧЕСКИ ВАЖНО: Устанавливаем текущий экземпляр бота
+Bot.set_current(bot)  # ← ЭТА СТРОКА ИСПРАВЛЯЕТ ОШИБКУ
+# ===================================================
 # Импорт базы данных
 try:
     from database import SessionLocal, Game, Participant
