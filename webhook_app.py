@@ -260,20 +260,25 @@ def webhook():
     try:
         update = types.Update(**request.get_json())
         
-        # Создаем event loop для асинхронного вызова
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Получаем текущий event loop или создаем новый
         try:
-            loop.run_until_complete(dp.process_update(update))
-            return jsonify({'status': 'ok'})
-        finally:
-            loop.close()
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Создаем новую задачу в существующем loop
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Запускаем асинхронную функцию
+        loop.run_until_complete(dp.process_update(bot=bot, update=update))
+        return jsonify({'status': 'ok'})
             
     except Exception as e:
         logger.error(f"Ошибка в webhook: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
 @app.route('/')
 def index():
     return "🎅 Бот 'Тайный Санта' работает на Railway!<br>Статус: ONLINE<br><a href='/set_webhook'>Установить вебхук</a>"
