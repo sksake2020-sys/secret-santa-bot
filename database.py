@@ -1,9 +1,10 @@
-# database.py - УПРОЩЕННАЯ ВЕРСИЯ ДЛЯ RAILWAY
+# database.py - ВЕРСИЯ ДЛЯ POSTGRESQL НА RAILWAY
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
+import urllib.parse
 
 Base = declarative_base()
 
@@ -37,35 +38,45 @@ class Participant(Base):
     
     game = relationship("Game", back_populates="participants")
 
-# ============== НАСТРОЙКА ПОДКЛЮЧЕНИЯ ==============
-# Получаем URL базы данных
+# ============== НАСТРОЙКА ПОДКЛЮЧЕНИЯ К POSTGRESQL ==============
+# Получаем URL базы данных от Railway
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if not DATABASE_URL or DATABASE_URL.strip() == '':
-    # Режим тестирования: используем SQLite в памяти
+    # Режим тестирования: SQLite в памяти
     DATABASE_URL = 'sqlite:///:memory:'
     print("⚠️ DATABASE_URL не установлен, использую SQLite in-memory")
-elif DATABASE_URL.startswith('postgres://'):
-    # Исправляем для SQLAlchemy 2.x
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+else:
+    # Railway даёт URL в формате postgres://, а SQLAlchemy 1.4.x требует postgresql://
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    print(f"✅ Использую PostgreSQL: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else DATABASE_URL[:50]}...")
 
-# Создаем engine с безопасными параметрами
+# Создаем engine
 try:
     if DATABASE_URL.startswith('sqlite'):
         engine = create_engine(
             DATABASE_URL, 
-            connect_args={"check_same_thread": False}
+            connect_args={"check_same_thread": False},
+            echo=False  # Убрать SQL-логи для продакшена
         )
     else:
-        engine = create_engine(DATABASE_URL)
+        # Для PostgreSQL
+        engine = create_engine(
+            DATABASE_URL,
+            pool_size=10,           # Размер пула соединений
+            max_overflow=20,        # Максимальное количество соединений
+            pool_recycle=3600,      # Пересоздавать соединения каждый час
+            echo=False              # Убрать SQL-логи
+        )
     
-    # Создаем таблицы
+    # Создаем таблицы (если их нет)
     Base.metadata.create_all(bind=engine)
-    print(f"✅ База данных подключена: {DATABASE_URL[:50]}...")
+    print("✅ Таблицы созданы/проверены успешно")
     
 except Exception as e:
     print(f"❌ Ошибка подключения к базе данных: {e}")
-    # Аварийный режим: SQLite в памяти
+    # Аварийный режим
     DATABASE_URL = 'sqlite:///:memory:'
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
@@ -81,3 +92,20 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Функция для проверки подключения
+def test_connection():
+    """Тест подключения к базе данных"""
+    try:
+        db = SessionLocal()
+        result = db.execute("SELECT version()").fetchone()
+        db.close()
+        print(f"✅ Подключение к БД: {result[0] if result else 'OK'}")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка теста подключения: {e}")
+        return False
+
+# Автоматически тестируем подключение при импорте
+if __name__ != "__main__":
+    test_connection()
