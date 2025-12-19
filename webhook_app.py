@@ -1,4 +1,4 @@
-# webhook_app.py - ВЕРСИЯ ДЛЯ RAILWAY.APP
+# webhook_app.py - СИНХРОННАЯ ВЕРСИЯ ДЛЯ FLASK
 from flask import Flask, request, jsonify
 import asyncio
 import logging
@@ -17,28 +17,25 @@ import os
 # Получаем токен из переменных окружения Railway
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 if not BOT_TOKEN:
-    # Для локальной разработки можно указать токен здесь
-    raise ValueError("BOT_TOKEN не установлен в переменных окружения!")
+    raise ValueError("BOT_TOKEN не установлен! Добавьте его в Railway Variables.")
 
-# Получаем URL Railway
 # Получаем URL Railway
 RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL')
 if RAILWAY_STATIC_URL:
     WEBHOOK_HOST = RAILWAY_STATIC_URL
 else:
-    # Явно указываем полный URL с https://
+    # Явно указываем URL
     WEBHOOK_HOST = "https://web-production-1a5d8.up.railway.app"
 
-# Убедитесь, что URL начинается с https://
+# Убедимся, что есть https://
 if not WEBHOOK_HOST.startswith('http'):
     WEBHOOK_HOST = f"https://{WEBHOOK_HOST}"
 
 WEBHOOK_PATH = f'/webhook/{BOT_TOKEN}'
 WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
 
-# Для отладки
-print(f"BOT_TOKEN: {'установлен' if BOT_TOKEN and BOT_TOKEN != '8572653274:AAHDvbfPcGSRzJl-RQ11m4akOW1Wq0NmXYw' else 'НЕ установлен'}")
-print(f"WEBHOOK_URL: {WEBHOOK_URL}")
+logger.info(f"BOT_TOKEN: {'установлен' if BOT_TOKEN else 'НЕ установлен'}")
+logger.info(f"WEBHOOK_HOST: {WEBHOOK_HOST}")
 # ===================================================
 
 # ИМПОРТЫ ДЛЯ AIOGRAM 2.25.1
@@ -53,44 +50,17 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# БАЗА ДАННЫХ для Railway (PostgreSQL)
-# Railway автоматически предоставляет PostgreSQL и переменную DATABASE_URL
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL:
-    # Если есть DATABASE_URL, используем PostgreSQL
-    if DATABASE_URL.startswith('postgres://'):
-        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    
-    from sqlalchemy import create_engine, Column, Integer, String, Boolean, Text, DateTime
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy.orm import sessionmaker
-    from datetime import datetime
-    
-    engine = create_engine(DATABASE_URL)
-    Base = declarative_base()
-    
-    class Game(Base):
-        __tablename__ = 'games'
-        id = Column(Integer, primary_key=True)
-        name = Column(String(100), nullable=False)
-        admin_id = Column(Integer, nullable=False)
-        # ... остальные поля как в вашем database.py
-    
-    class Participant(Base):
-        __tablename__ = 'participants'
-        id = Column(Integer, primary_key=True)
-        # ... остальные поля как в вашем database.py
-    
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    
-    logger.info("Использую PostgreSQL базу данных от Railway")
-else:
-    # Если нет DATABASE_URL, используем SQLite (для локальной разработки)
-    logger.warning("DATABASE_URL не найден, использую SQLite")
-    from database import SessionLocal, Game, Participant  # ваш старый файл
+# Импорт базы данных
+try:
+    from database import SessionLocal, Game, Participant
+    logger.info("База данных импортирована успешно")
+except ImportError as e:
+    logger.error(f"Ошибка импорта database.py: {e}")
+    SessionLocal = None
+    Game = None
+    Participant = None
 
-# ============== ПРОСТЫЕ ОБРАБОТЧИКИ ДЛЯ ТЕСТА ==============
+# ============== ПРОСТЫЕ ОБРАБОТЧИКИ ==============
 @dp.message_handler(commands=['start'])
 async def handle_start(message: types.Message):
     """Обработчик команды /start"""
@@ -111,55 +81,67 @@ async def handle_help(message: types.Message):
         "Бот работает на Railway!"
     )
 
-@dp.message_handler(commands=['test'])
-async def handle_test(message: types.Message):
-    """Тест соединения с базой данных"""
-    try:
-        db = SessionLocal()
-        db.execute("SELECT 1")
-        await message.answer("✅ База данных работает!")
-        db.close()
-    except Exception as e:
-        await message.answer(f"❌ Ошибка базы данных: {str(e)}")
-
 @dp.message_handler()
 async def handle_all_messages(message: types.Message):
     """Обработка всех сообщений"""
     await message.answer(f"Вы сказали: {message.text}\nИспользуйте /help")
 
-# ============== FLASK РОУТЫ ==============
+# ============== СИНХРОННЫЕ FLASK РОУТЫ ==============
 @app.route(WEBHOOK_PATH, methods=['POST'])
-async def webhook():
+def webhook():
     """Основной обработчик вебхуков от Telegram"""
     try:
         update = types.Update(**request.get_json())
-        await dp.process_update(update)
-        return jsonify({'status': 'ok'})
+        
+        # Создаем event loop для асинхронного вызова
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(dp.process_update(update))
+            return jsonify({'status': 'ok'})
+        finally:
+            loop.close()
+            
     except Exception as e:
         logger.error(f"Ошибка в webhook: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/')
 def index():
-    return "🎅 Бот 'Тайный Санта' работает на Railway!<br>Статус: ONLINE"
+    return "🎅 Бот 'Тайный Санта' работает на Railway!<br>Статус: ONLINE<br><a href='/set_webhook'>Установить вебхук</a>"
 
 @app.route('/set_webhook')
-async def set_webhook():
+def set_webhook():
     """Установка вебхука"""
     try:
-        await bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Вебхук установлен: {WEBHOOK_URL}")
-        return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
+            logger.info(f"Вебхук установлен: {WEBHOOK_URL}")
+            return f"✅ Вебхук установлен!<br>URL: {WEBHOOK_URL}"
+        finally:
+            loop.close()
+            
     except Exception as e:
         logger.error(f"Ошибка установки вебхука: {e}")
         return f"❌ Ошибка: {str(e)}"
 
 @app.route('/delete_webhook')
-async def delete_webhook():
+def delete_webhook():
     """Удаление вебхука"""
     try:
-        await bot.delete_webhook()
-        return "✅ Вебхук удален!"
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(bot.delete_webhook())
+            return "✅ Вебхук удален!"
+        finally:
+            loop.close()
+            
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
@@ -171,14 +153,12 @@ def status():
         'status': 'online',
         'service': 'Secret Santa Bot on Railway',
         'timestamp': datetime.datetime.now().isoformat(),
-        'webhook_url': WEBHOOK_URL,
-        'database': 'PostgreSQL' if DATABASE_URL else 'SQLite'
+        'webhook_url_set': True,
+        'host': WEBHOOK_HOST
     })
 
 # ============== ЗАПУСК ПРИЛОЖЕНИЯ ==============
 if __name__ == '__main__':
-    # Этот блок выполняется только при локальном запуске
     print("Запуск Flask приложения...")
-    # Получаем порт из переменной окружения (Railway сам назначает)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
