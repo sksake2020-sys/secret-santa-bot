@@ -1,6 +1,6 @@
 aiogram==2.25.1
 sqlalchemy<2.0.0
-flask==2.3.0
+flask[async]==2.3.0 
 gunicorn==21.2.0
 apscheduler==3.10.1
 psycopg2-binary==2.9.9
