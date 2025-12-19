@@ -18,16 +18,20 @@ import os
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 if not BOT_TOKEN:
     # Для локальной разработки можно указать токен здесь
-    BOT_TOKEN = "8572653274:AAHDvbfPcGSRzJl-RQ11m4akOW1Wq0NmXYw"  # ТОЛЬКО ДЛЯ ТЕСТА, потом удалить!
+    raise ValueError("BOT_TOKEN не установлен в переменных окружения!")
 
+# Получаем URL Railway
 # Получаем URL Railway
 RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL')
 if RAILWAY_STATIC_URL:
     WEBHOOK_HOST = RAILWAY_STATIC_URL
 else:
-    # После деплоя Railway даст URL типа: ваш-проект.up.railway.app
-    # Временно оставьте так, потом замените на реальный
+    # Явно указываем полный URL с https://
     WEBHOOK_HOST = "https://web-production-1a5d8.up.railway.app"
+
+# Убедитесь, что URL начинается с https://
+if not WEBHOOK_HOST.startswith('http'):
+    WEBHOOK_HOST = f"https://{WEBHOOK_HOST}"
 
 WEBHOOK_PATH = f'/webhook/{BOT_TOKEN}'
 WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
