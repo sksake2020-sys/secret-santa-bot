@@ -12,21 +12,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============== НАСТРОЙКИ ДЛЯ RAILWAY ==============
-# Railway автоматически даёт URL вашего приложения
-# Получаем токен из переменных окружения (добавим позже в настройках Railway)
-BOT_TOKEN = os.environ.get('BOT_TOKEN', 'ЗАМЕНИ_НА_СВОЙ_ТОКЕН')  # СНАЧАЛА ПОСТАВЬТЕ ТОКЕН ЗДЕСЬ
+import os
 
-# Получаем URL приложения от Railway
-RAILWAY_PUBLIC_URL = os.environ.get('RAILWAY_PUBLIC_URL', '')
-if RAILWAY_PUBLIC_URL:
-    WEBHOOK_HOST = RAILWAY_PUBLIC_URL
+# Получаем токен из переменных окружения Railway
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+if not BOT_TOKEN:
+    # Для локальной разработки можно указать токен здесь
+    BOT_TOKEN = "8572653274:AAHDvbfPcGSRzJl-RQ11m4akOW1Wq0NmXYw"  # ТОЛЬКО ДЛЯ ТЕСТА, потом удалить!
+
+# Получаем URL Railway
+RAILWAY_STATIC_URL = os.environ.get('RAILWAY_STATIC_URL')
+if RAILWAY_STATIC_URL:
+    WEBHOOK_HOST = RAILWAY_STATIC_URL
 else:
-    # Если переменной нет, используем стандартный домен Railway
-    # Нужно будет обновить после первого деплоя
-    WEBHOOK_HOST = 'https://ваше-название.up.railway.app'  # ЗАМЕНИТЕ ПОСЛЕ ДЕПЛОЯ
+    # После деплоя Railway даст URL типа: ваш-проект.up.railway.app
+    # Временно оставьте так, потом замените на реальный
+    WEBHOOK_HOST = "https://ваш-проект.up.railway.app"
 
 WEBHOOK_PATH = f'/webhook/{BOT_TOKEN}'
 WEBHOOK_URL = f'{WEBHOOK_HOST}{WEBHOOK_PATH}'
+
+# Для отладки
+print(f"BOT_TOKEN: {'установлен' if BOT_TOKEN and BOT_TOKEN != '8572653274:AAHDvbfPcGSRzJl-RQ11m4akOW1Wq0NmXYw' else 'НЕ установлен'}")
+print(f"WEBHOOK_URL: {WEBHOOK_URL}")
 # ===================================================
 
 # ИМПОРТЫ ДЛЯ AIOGRAM 2.25.1
