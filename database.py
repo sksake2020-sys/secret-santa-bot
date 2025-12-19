@@ -1,4 +1,4 @@
-# database.py
+# database.py - УПРОЩЕННАЯ ВЕРСИЯ ДЛЯ RAILWAY
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -7,6 +7,7 @@ import os
 
 Base = declarative_base()
 
+# ============== МОДЕЛИ БАЗЫ ДАННЫХ ==============
 class Game(Base):
     __tablename__ = 'games'
     
@@ -36,11 +37,41 @@ class Participant(Base):
     
     game = relationship("Game", back_populates="participants")
 
-# Используем SQLite. Файл базы будет создан в той же директории.
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///secret_santa.db')
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {})
-Base.metadata.create_all(bind=engine)
+# ============== НАСТРОЙКА ПОДКЛЮЧЕНИЯ ==============
+# Получаем URL базы данных
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
+if not DATABASE_URL or DATABASE_URL.strip() == '':
+    # Режим тестирования: используем SQLite в памяти
+    DATABASE_URL = 'sqlite:///:memory:'
+    print("⚠️ DATABASE_URL не установлен, использую SQLite in-memory")
+elif DATABASE_URL.startswith('postgres://'):
+    # Исправляем для SQLAlchemy 2.x
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+# Создаем engine с безопасными параметрами
+try:
+    if DATABASE_URL.startswith('sqlite'):
+        engine = create_engine(
+            DATABASE_URL, 
+            connect_args={"check_same_thread": False}
+        )
+    else:
+        engine = create_engine(DATABASE_URL)
+    
+    # Создаем таблицы
+    Base.metadata.create_all(bind=engine)
+    print(f"✅ База данных подключена: {DATABASE_URL[:50]}...")
+    
+except Exception as e:
+    print(f"❌ Ошибка подключения к базе данных: {e}")
+    # Аварийный режим: SQLite в памяти
+    DATABASE_URL = 'sqlite:///:memory:'
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    print("✅ Использую аварийный режим (SQLite in-memory)")
+
+# Создаем сессию
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
