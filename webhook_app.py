@@ -41,36 +41,11 @@ event_loop = None
 # ============== КОРРЕКТНОЕ ЗАВЕРШЕНИЕ ==============
 def cleanup():
     """Корректное завершение всех ресурсов"""
-    global worker_running, bot_instance, dp_instance, event_loop
-    
+    global worker_running
+
     logger.info("🔄 Начинаю cleanup...")
-    worker_running = False
-    
-    # Закрываем бота
-    if bot_instance:
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(bot_instance.close())
-            loop.close()
-            logger.info("✅ Бот закрыт")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при закрытии бота: {e}")
-    
-    # Очищаем очередь
-    try:
-        while not update_queue.empty():
-            update_queue.get_nowait()
-            update_queue.task_done()
-        logger.info("✅ Очередь очищена")
-    except:
-        pass
-    
-    logger.info("✅ Cleanup завершен")
-
-# Регистрируем cleanup
-atexit.register(cleanup)
-
+    worker_running = False  # Этот флаг остановит цикл воркера
+    logger.info("✅ Флаг завершения установлен")
 # ============== ФОНОВЫЙ ОБРАБОТЧИК ==============
 def background_worker():
     """Фоновый обработчик сообщений"""
