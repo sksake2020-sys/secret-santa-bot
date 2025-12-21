@@ -27,7 +27,7 @@ def start_worker(bot_token: str, bot_username: str):
     """Запускает aiogram worker в отдельном потоке."""
 
     def worker():
-        bot = Bot(token=bot_token)
+        bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
         dp = Dispatcher(bot, storage=MemoryStorage())
 
         # -------------------- Команды --------------------
