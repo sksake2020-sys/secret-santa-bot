@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class GameManager:
 
     @staticmethod
-    def create_game(creator_id: int, creator_name: str, game_name: str, budget: str | None = None):
+    def create_game(creator_id: int, creator_name: str, game_name: str, creator_tg: str | None = None, budget: str | None = None):
         """Создаёт новую игру и добавляет создателя как участника."""
         db = SessionLocal()
         try:
@@ -39,7 +39,7 @@ class GameManager:
             participant = Participant(
                 game_id=game_id,
                 user_id=creator_id,
-                username=creator_name,
+                username=creator_tg,
                 full_name=creator_name
             )
             db.add(participant)
@@ -64,7 +64,7 @@ class GameManager:
             db.close()
 
     @staticmethod
-    def join_game(game_id: str, user_id: int, username: str):
+    def join_game(game_id: str, user_id: int, tg_username: str | None, full_name: str):
         """Присоединяет пользователя к игре."""
         db = SessionLocal()
         try:
@@ -86,8 +86,8 @@ class GameManager:
             participant = Participant(
                 game_id=game_id,
                 user_id=user_id,
-                username=username,
-                full_name=username
+                username=tg_username,
+                full_name=full_name
             )
             db.add(participant)
             db.commit()
@@ -150,7 +150,6 @@ class GameManager:
                     Participant.user_id == receiver_id
                 ).first()
                 if receiver_part:
-                    # если в модели есть поля target_username/target_full_name — заполним их
                     if hasattr(giver_rec, "target_username"):
                         try:
                             giver_rec.target_username = receiver_part.username
