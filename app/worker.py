@@ -54,13 +54,6 @@ def start_worker(bot_token: str, bot_username: str):
                 )
             return kb
 
-        async def delete_command_later(chat_id: int, message_id: int, delay: float = 2.0):
-            await asyncio.sleep(delay)
-            try:
-                await bot.delete_message(chat_id, message_id)
-            except Exception:
-                pass
-
         # -------------------- Команды --------------------
 
         @dp.message_handler(commands=['start'])
@@ -95,7 +88,6 @@ def start_worker(bot_token: str, bot_username: str):
                     )
                 else:
                     await bot.send_message(message.chat.id, res, reply_markup=main_menu_keyboard(is_admin=is_admin))
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             await bot.send_message(
@@ -103,26 +95,22 @@ def start_worker(bot_token: str, bot_username: str):
                 MESSAGES["start_welcome"],
                 reply_markup=main_menu_keyboard(is_admin=is_admin)
             )
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['help'])
         async def cmd_help(message: types.Message):
             await bot.send_message(message.chat.id, MESSAGES["help"])
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['newgame'])
         async def cmd_newgame(message: types.Message):
             uid = message.from_user.id
             pending_new_game.add(uid)
             await bot.send_message(message.chat.id, MESSAGES["newgame_prompt"])
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['join'])
         async def cmd_join(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
                 await bot.send_message(message.chat.id, "❌ Укажите код: <b>/join ABC123XY</b>")
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             code = parts[1].upper()
@@ -136,7 +124,6 @@ def start_worker(bot_token: str, bot_username: str):
                 full_name
             )
             await bot.send_message(message.chat.id, res)
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['startgame'])
         async def cmd_startgame(message: types.Message):
@@ -150,7 +137,6 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game:
                     await bot.send_message(message.chat.id, "❌ У вас нет игр, которые можно запустить.")
-                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 ok, res = GameManager.start_game(game.id, message.from_user.id)
@@ -193,8 +179,6 @@ def start_worker(bot_token: str, bot_username: str):
             finally:
                 db.close()
 
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['finishgame'])
         async def cmd_finishgame(message: types.Message):
             db = SessionLocal()
@@ -206,7 +190,6 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game:
                     await bot.send_message(message.chat.id, "❌ У вас нет активных игр.")
-                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 ok, res = GameManager.finish_game(game.id, message.from_user.id)
@@ -229,8 +212,6 @@ def start_worker(bot_token: str, bot_username: str):
             finally:
                 db.close()
 
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['wish'])
         async def cmd_wish(message: types.Message):
             text = message.text.strip()
@@ -238,12 +219,10 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not wishlist:
                 await bot.send_message(message.chat.id, "📝 Укажите пожелания: <b>/wish Хочу книгу</b>")
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             ok, res = GameManager.set_wishlist(message.from_user.id, wishlist)
             await bot.send_message(message.chat.id, res)
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['mytargets', 'mytarget'])
         async def cmd_mytargets(message: types.Message):
@@ -251,7 +230,6 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not results:
                 await bot.send_message(message.chat.id, "📭 У вас пока нет активных назначений.")
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             lines = []
@@ -279,7 +257,6 @@ def start_worker(bot_token: str, bot_username: str):
                     )
 
             await bot.send_message(message.chat.id, "\n\n".join(lines))
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['mygames'])
         async def cmd_mygames(message: types.Message):
@@ -293,7 +270,6 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game_ids:
                     await bot.send_message(message.chat.id, "📭 У вас пока нет игр.")
-                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 lines = []
@@ -323,14 +299,11 @@ def start_worker(bot_token: str, bot_username: str):
             finally:
                 db.close()
 
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['gameinfo'])
         async def cmd_gameinfo(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
                 await bot.send_message(message.chat.id, "❌ Укажите код: <b>/gameinfo ABC123XY</b>")
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             code = parts[1].upper()
@@ -338,7 +311,6 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not info:
                 await bot.send_message(message.chat.id, f"❌ Игра с кодом <code>{code}</code> не найдена")
-                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             status_map = {
@@ -376,8 +348,6 @@ def start_worker(bot_token: str, bot_username: str):
                 )
             )
 
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['players'])
         async def cmd_players(message: types.Message):
             db = SessionLocal()
@@ -388,13 +358,11 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not p:
                     await bot.send_message(message.chat.id, "❌ Вы не участвуете в игре.")
-                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 g = db.query(Game).filter(Game.id == p.game_id).first()
                 if not g:
                     await bot.send_message(message.chat.id, "❌ Игра не найдена.")
-                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 participants = db.query(Participant).filter(
@@ -422,8 +390,6 @@ def start_worker(bot_token: str, bot_username: str):
             finally:
                 db.close()
 
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['status'])
         async def cmd_status(message: types.Message):
             db = SessionLocal()
@@ -447,8 +413,6 @@ def start_worker(bot_token: str, bot_username: str):
                 )
             finally:
                 db.close()
-
-            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         # -------------------- Callback-кнопки меню --------------------
 
