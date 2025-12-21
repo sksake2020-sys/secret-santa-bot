@@ -1,5 +1,5 @@
 # app/worker.py
-# Aiogram background worker: обрабатывает команды Telegram-бота
+# Aiogram background worker: обрабатывает команды Telegram-бота (HTML-версия)
 
 import asyncio
 import logging
@@ -27,7 +27,7 @@ def start_worker(bot_token: str, bot_username: str):
     """Запускает aiogram worker в отдельном потоке."""
 
     def worker():
-        bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+        bot = Bot(token=bot_token, parse_mode="HTML")
         dp = Dispatcher(bot, storage=MemoryStorage())
 
         # -------------------- Команды --------------------
@@ -46,8 +46,7 @@ def start_worker(bot_token: str, bot_username: str):
                     g = GameManager.get_game_info(code)
                     await bot.send_message(
                         message.chat.id,
-                        MESSAGES["joined_game"].format(name=g['name'], code=code),
-                        parse_mode="Markdown"
+                        MESSAGES["joined_game"].format(name=g['name'], code=code)
                     )
                 else:
                     await bot.send_message(message.chat.id, res)
@@ -59,8 +58,7 @@ def start_worker(bot_token: str, bot_username: str):
         async def cmd_help(message: types.Message):
             await bot.send_message(
                 message.chat.id,
-                MESSAGES["help"].format(bot=bot_username),
-                parse_mode="Markdown"
+                MESSAGES["help"].format(bot=bot_username)
             )
 
         @dp.message_handler(commands=['newgame'])
@@ -73,7 +71,7 @@ def start_worker(bot_token: str, bot_username: str):
         async def cmd_join(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
-                await bot.send_message(message.chat.id, "❌ Укажите код: /join ABC123XY")
+                await bot.send_message(message.chat.id, "❌ Укажите код: <b>/join ABC123XY</b>")
                 return
 
             code = parts[1].upper()
@@ -129,8 +127,7 @@ def start_worker(bot_token: str, bot_username: str):
                                 MESSAGES["startgame_notify"].format(
                                     name=display,
                                     wishlist=wishlist
-                                ),
-                                parse_mode="Markdown"
+                                )
                             )
                         except Exception as e:
                             logger.exception("Failed to send DM: %s", e)
@@ -177,7 +174,7 @@ def start_worker(bot_token: str, bot_username: str):
             wishlist = text[6:].strip() if len(text) > 6 else ""
 
             if not wishlist:
-                await bot.send_message(message.chat.id, "📝 Укажите пожелания: /wish Хочу книгу")
+                await bot.send_message(message.chat.id, "📝 Укажите пожелания: <b>/wish Хочу книгу</b>")
                 return
 
             ok, res = GameManager.set_wishlist(message.from_user.id, wishlist)
@@ -195,7 +192,7 @@ def start_worker(bot_token: str, bot_username: str):
             for r in results:
                 if not r.get("target_id"):
                     lines.append(
-                        f"Игра: *{r['game_name']}* (код `{r['game_id']}`) — получатель: ❌ не назначен"
+                        f"<b>Игра:</b> {r['game_name']} — получатель: ❌ не назначен"
                     )
                     continue
 
@@ -203,18 +200,18 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if username_is_valid_for_link(r.get("target_username")):
                     lines.append(
-                        f"Игра: *{r['game_name']}*\n"
-                        f"Получатель: [{display}](https://t.me/{r['target_username']})\n"
+                        f"<b>Игра:</b> {r['game_name']}<br>"
+                        f"Получатель: <a href=\"https://t.me/{r['target_username']}\">{display}</a><br>"
                         f"Пожелания: {r['target_wishlist']}"
                     )
                 else:
                     lines.append(
-                        f"Игра: *{r['game_name']}*\n"
-                        f"Получатель: {display}\n"
+                        f"<b>Игра:</b> {r['game_name']}<br>"
+                        f"Получатель: {display}<br>"
                         f"Пожелания: {r['target_wishlist']}"
                     )
 
-            await bot.send_message(message.chat.id, "\n\n".join(lines), parse_mode="Markdown")
+            await bot.send_message(message.chat.id, "<br><br>".join(lines))
 
         @dp.message_handler(commands=['mygames'])
         async def cmd_mygames(message: types.Message):
@@ -245,9 +242,9 @@ def start_worker(bot_token: str, bot_username: str):
                         ("Ожидание" if g.is_active else "Завершена")
                     )
 
-                    lines.append(f"- {g.name} (код: {g.id}, статус: {status}) — {count} участников")
+                    lines.append(f"• <b>{g.name}</b> (код: <code>{g.id}</code>, статус: {status}) — {count} участников")
 
-                await bot.send_message(message.chat.id, "📋 Ваши игры:\n" + "\n".join(lines))
+                await bot.send_message(message.chat.id, "<b>📋 Ваши игры:</b><br>" + "<br>".join(lines))
 
             finally:
                 db.close()
@@ -256,14 +253,14 @@ def start_worker(bot_token: str, bot_username: str):
         async def cmd_gameinfo(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
-                await bot.send_message(message.chat.id, "❌ Укажите код: /gameinfo ABC123XY")
+                await bot.send_message(message.chat.id, "❌ Укажите код: <b>/gameinfo ABC123XY</b>")
                 return
 
             code = parts[1].upper()
             info = GameManager.get_game_info(code)
 
             if not info:
-                await bot.send_message(message.chat.id, f"❌ Игра с кодом {code} не найдена")
+                await bot.send_message(message.chat.id, f"❌ Игра с кодом <code>{code}</code> не найдена")
                 return
 
             status_map = {
@@ -280,11 +277,11 @@ def start_worker(bot_token: str, bot_username: str):
                     mark = "📝" if p.get("has_wishlist") else "❔"
 
                     if username_is_valid_for_link(p.get("username")):
-                        extra_lines.append(f"- [{uname}](https://t.me/{p.get('username')}) {mark}")
+                        extra_lines.append(f"• <a href=\"https://t.me/{p.get('username')}\">{uname}</a> {mark}")
                     else:
-                        extra_lines.append(f"- {uname} {mark}")
+                        extra_lines.append(f"• {uname} {mark}")
 
-                extra = "Участники:\n" + "\n".join(extra_lines)
+                extra = "<br>".join(extra_lines)
 
             await bot.send_message(
                 message.chat.id,
@@ -297,8 +294,7 @@ def start_worker(bot_token: str, bot_username: str):
                     created=info["created_at"][:10] if info["created_at"] else "",
                     count=len(info["participants"]),
                     extra=extra
-                ),
-                parse_mode="Markdown"
+                )
             )
 
         @dp.message_handler(commands=['players'])
@@ -325,11 +321,11 @@ def start_worker(bot_token: str, bot_username: str):
                 lines = []
                 for i, part in enumerate(participants, 1):
                     uname = part.username or part.full_name or str(part.user_id)
-                    link = (
-                        f"[{uname}](https://t.me/{part.username})"
-                        if username_is_valid_for_link(part.username)
-                        else uname
-                    )
+                    if username_is_valid_for_link(part.username):
+                        link = f"<a href=\"https://t.me/{part.username}\">{uname}</a>"
+                    else:
+                        link = uname
+
                     creator_mark = " 👑" if part.user_id == g.admin_id else ""
                     wishlist_mark = " 📝" if part.wishlist else " ❔"
 
@@ -337,8 +333,7 @@ def start_worker(bot_token: str, bot_username: str):
 
                 await bot.send_message(
                     message.chat.id,
-                    MESSAGES["players_list_header"].format(name=g.name) + "\n" + "\n".join(lines),
-                    parse_mode="Markdown"
+                    f"<b>Участники игры {g.name}:</b><br>" + "<br>".join(lines)
                 )
 
             finally:
@@ -363,8 +358,7 @@ def start_worker(bot_token: str, bot_username: str):
                         finished=finished_games,
                         players=total_players,
                         queue=update_queue.qsize()
-                    ),
-                    parse_mode="Markdown"
+                    )
                 )
             finally:
                 db.close()
@@ -395,8 +389,7 @@ def start_worker(bot_token: str, bot_username: str):
                             name=g["name"],
                             code=g["id"],
                             link=g["invite_link"]
-                        ),
-                        parse_mode="Markdown"
+                        )
                     )
                 except Exception as e:
                     logger.exception("Error creating game: %s", e)
@@ -407,7 +400,8 @@ def start_worker(bot_token: str, bot_username: str):
             if len(text) == 8 and text.isalnum():
                 await bot.send_message(
                     message.chat.id,
-                    f"🔍 Похоже на код игры.\nПрисоединиться: https://t.me/{bot_username}?start=join_{text.upper()}"
+                    f"🔍 Похоже на код игры.<br>"
+                    f"Присоединиться: https://t.me/{bot_username}?start=join_{text.upper()}"
                 )
                 return
 
