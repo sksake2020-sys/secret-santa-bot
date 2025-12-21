@@ -90,4 +90,121 @@ def webhook():
 @app.route("/")
 def index():
     return (
-        f
+        f"🎅 Secret Santa Bot работает<br>"
+        f"Webhook: {WEBHOOK_URL}<br><br>"
+        f"<a href='/set_webhook'>Установить вебхук</a><br>"
+        f"<a href='/delete_webhook'>Удалить вебхук</a><br>"
+        f"<a href='/status'>Статус</a><br>"
+        f"<a href='/version'>Версия</a><br>"
+    )
+
+@app.route("/set_webhook")
+def set_webhook():
+    from aiogram import Bot
+    import asyncio
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        bot = Bot(token=BOT_TOKEN)
+        loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
+        loop.run_until_complete(bot.session.close())
+
+        return f"✅ Вебхук установлен: {WEBHOOK_URL}"
+
+    except Exception as e:
+        logger.exception("Error set_webhook: %s", e)
+        return f"❌ Ошибка: {e}"
+
+@app.route("/delete_webhook")
+def delete_webhook():
+    from aiogram import Bot
+    import asyncio
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        bot = Bot(token=BOT_TOKEN)
+        loop.run_until_complete(bot.delete_webhook())
+        loop.run_until_complete(bot.session.close())
+
+        return "✅ Вебхук удалён"
+
+    except Exception as e:
+        logger.exception("Error delete_webhook: %s", e)
+        return f"❌ Ошибка: {e}"
+
+@app.route("/status")
+def status():
+    db = SessionLocal()
+    try:
+        total_games = db.query(Game).count()
+        active_games = db.query(Game).filter(Game.is_started == True).count()
+        waiting_games = db.query(Game).filter(Game.is_started == False, Game.is_active == True).count()
+        finished_games = db.query(Game).filter(Game.is_active == False).count()
+        total_players = db.query(Participant).distinct(Participant.user_id).count()
+
+        return jsonify({
+            "service": "Secret Santa Bot",
+            "status": "online",
+            "webhook_url": WEBHOOK_URL,
+            "background_worker": True,
+            "queue_size": update_queue.qsize(),
+            "total_games": total_games,
+            "active_games": active_games,
+            "waiting_games": waiting_games,
+            "finished_games": finished_games,
+            "total_players": total_players
+        })
+
+    finally:
+        db.close()
+
+@app.route("/dump_games")
+def dump_games():
+    caller = request.args.get("admin_id")
+
+    if ADMIN_ID and str(caller) != str(ADMIN_ID):
+        return jsonify({"error": "forbidden"}), 403
+
+    db = SessionLocal()
+    try:
+        games = []
+        for g in db.query(Game).all():
+            participants = []
+            for p in db.query(Participant).filter(Participant.game_id == g.id).all():
+                participants.append({
+                    "user_id": p.user_id,
+                    "username": p.username,
+                    "full_name": p.full_name,
+                    "wishlist": p.wishlist,
+                    "target_id": p.target_id
+                })
+
+            games.append({
+                "id": g.id,
+                "name": g.name,
+                "admin_id": g.admin_id,
+                "admin_username": g.admin_username,
+                "is_active": g.is_active,
+                "is_started": g.is_started,
+                "created_at": g.created_at.isoformat() if g.created_at else None,
+                "started_at": g.started_at.isoformat() if g.started_at else None,
+                "participants": participants
+            })
+
+        return jsonify({"games": games})
+
+    finally:
+        db.close()
+
+# ---------------------------------------------------------
+# ЗАПУСК (локально)
+# ---------------------------------------------------------
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    logger.info("Starting Flask app on port %s", port)
+    app.run(host="0.0.0.0", port=port)
