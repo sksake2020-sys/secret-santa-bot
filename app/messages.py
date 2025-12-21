@@ -96,3 +96,47 @@ ERROR_MESSAGE = """
 <b>❌ Произошла ошибка.</b>  
 Попробуйте ещё раз позже.
 """
+MESSAGES = {
+    "start_welcome": WELCOME_TEXT,
+    "help": HELP_TEXT,
+    "game_created": GAME_CREATED,
+    "game_already_exists": GAME_ALREADY_EXISTS,
+    "game_not_found": GAME_NOT_FOUND,
+    "joined_game": JOINED_GAME,
+    "already_in_game": ALREADY_IN_GAME,
+    "left_game": LEFT_GAME,
+    "no_active_game": NO_ACTIVE_GAME,
+    "participants_header": PARTICIPANTS_HEADER,
+    "no_participants": NO_PARTICIPANTS,
+    "game_started": GAME_STARTED,
+    "recipient_info": RECIPIENT_INFO,
+    "no_recipient": NO_RECIPIENT,
+    "error": ERROR_MESSAGE,
+
+    # Эти ключи worker использует, но текстов пока нет — добавим позже
+    "newgame_prompt": "<b>Введите название новой игры:</b>",
+    "startgame_notify": "<b>🎁 Ваш получатель:</b> {name}<br>Пожелания: {wishlist}",
+    "finishgame": "<b>Игра «{name}» завершена!</b>",
+    "gameinfo": (
+        "<b>🎄 Информация об игре:</b><br>"
+        "<b>Название:</b> {name}<br>"
+        "<b>Код:</b> <code>{code}</code><br>"
+        "<b>Создатель:</b> {creator}<br>"
+        "<b>Статус:</b> {status}<br>"
+        "<b>Бюджет:</b> {budget}<br>"
+        "<b>Создана:</b> {created}<br>"
+        "<b>Участников:</b> {count}<br><br>"
+        "{extra}"
+    ),
+    "players_list_header": "<b>👥 Участники игры {name}:</b>",
+    "status": (
+        "<b>📊 Статистика:</b><br>"
+        "Всего игр: {total}<br>"
+        "Активных: {active}<br>"
+        "Ожидают: {waiting}<br>"
+        "Завершено: {finished}<br>"
+        "Участников всего: {players}<br>"
+        "Очередь обновлений: {queue}"
+    ),
+    "unknown_command": "❓ Неизвестная команда. Используйте <b>/help</b>."
+}
