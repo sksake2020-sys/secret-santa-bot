@@ -66,10 +66,12 @@ def start_worker(bot_token: str, bot_username: str):
         @dp.message_handler(commands=['start'])
         async def cmd_start(message: types.Message):
             is_admin = False
-            # Простая эвристика: если он админ хотя бы одной игры
             db = SessionLocal()
             try:
-                is_admin = db.query(Game).filter(Game.admin_id == message.from_user.id, Game.is_active == True).count() > 0
+                is_admin = db.query(Game).filter(
+                    Game.admin_id == message.from_user.id,
+                    Game.is_active == True
+                ).count() > 0
             finally:
                 db.close()
 
@@ -101,10 +103,7 @@ def start_worker(bot_token: str, bot_username: str):
 
         @dp.message_handler(commands=['help'])
         async def cmd_help(message: types.Message):
-            await bot.send_message(
-                message.chat.id,
-                MESSAGES["help"]
-            )
+            await bot.send_message(message.chat.id, MESSAGES["help"])
             asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['newgame'])
@@ -150,6 +149,8 @@ def start_worker(bot_token: str, bot_username: str):
                 await bot.send_message(message.chat.id, res)
 
                 if ok:
+                    await bot.send_message(message.chat.id, MESSAGES["game_started"])
+
                     participants = db.query(Participant).filter(
                         Participant.game_id == game.id
                     ).all()
@@ -169,8 +170,6 @@ def start_worker(bot_token: str, bot_username: str):
                         wishlist = target.wishlist or "Пожелания не указаны"
                         display = target.username or target.full_name or str(target.user_id)
 
-                        logger.info("pair_sent: game=%s santa=%s receiver=%s", game.id, p.user_id, target.user_id)
-
                         try:
                             await bot.send_message(
                                 p.user_id,
@@ -187,7 +186,6 @@ def start_worker(bot_token: str, bot_username: str):
                 db.close()
 
             asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
-
         @dp.message_handler(commands=['finishgame'])
         async def cmd_finishgame(message: types.Message):
             db = SessionLocal()
@@ -348,9 +346,9 @@ def start_worker(bot_token: str, bot_username: str):
                     mark = "📝" if p.get("has_wishlist") else "❔"
 
                     if username_is_valid_for_link(p.get("username")):
-                        extra_lines.append(f"• <a href=\"https://t.me/{p.get('username')}\">{uname}</a> {mark}")
+                        extra_lines.append(f"- <a href=\"https://t.me/{p.get('username')}\">{uname}</a> {mark}")
                     else:
-                        extra_lines.append(f"• {uname} {mark}")
+                        extra_lines.append(f"- {uname} {mark}")
 
                 extra = "\n".join(extra_lines)
 
@@ -364,7 +362,8 @@ def start_worker(bot_token: str, bot_username: str):
                     budget=info["budget"],
                     created=info["created_at"][:10] if info["created_at"] else "",
                     count=len(info["participants"]),
-                    extra=extra
+                    extra=extra,
+                    bot=bot_username,
                 )
             )
 
@@ -447,69 +446,31 @@ def start_worker(bot_token: str, bot_username: str):
         @dp.callback_query_handler(lambda c: c.data and c.data.startswith("menu_"))
         async def menu_callbacks(callback_query: types.CallbackQuery):
             data = callback_query.data
-            uid = callback_query.from_user.id
-            chat_id = callback_query.message.chat.id
 
             if data == "menu_help":
-                await bot.send_message(chat_id, MESSAGES["help"])
+                await bot.send_message(callback_query.message.chat.id, MESSAGES["help"])
+
             elif data == "menu_newgame":
-                pending_new_game.add(uid)
-                await bot.send_message(chat_id, MESSAGES["newgame_prompt"])
+                pending_new_game.add(callback_query.from_user.id)
+                await bot.send_message(callback_query.message.chat.id, MESSAGES["newgame_prompt"])
+
             elif data == "menu_mytargets":
-                # Переиспользуем логику команды /mytargets
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/mytargets"
-                )
-                await cmd_mytargets(msg)
+                await cmd_mytargets(callback_query.message)
+
             elif data == "menu_mygames":
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/mygames"
-                )
-                await cmd_mygames(msg)
+                await cmd_mygames(callback_query.message)
+
             elif data == "menu_players":
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/players"
-                )
-                await cmd_players(msg)
+                await cmd_players(callback_query.message)
+
             elif data == "menu_status":
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/status"
-                )
-                await cmd_status(msg)
+                await cmd_status(callback_query.message)
+
             elif data == "menu_startgame":
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/startgame"
-                )
-                await cmd_startgame(msg)
+                await cmd_startgame(callback_query.message)
+
             elif data == "menu_finishgame":
-                msg = types.Message(
-                    message_id=callback_query.message.message_id,
-                    date=callback_query.message.date,
-                    chat=callback_query.message.chat,
-                    from_user=callback_query.from_user,
-                    text="/finishgame"
-                )
-                await cmd_finishgame(msg)
+                await cmd_finishgame(callback_query.message)
 
             await bot.answer_callback_query(callback_query.id)
 
@@ -520,7 +481,6 @@ def start_worker(bot_token: str, bot_username: str):
             uid = message.from_user.id
             text = (message.text or "").strip()
 
-            # Пользователь вводит название игры
             if uid in pending_new_game:
                 pending_new_game.remove(uid)
 
@@ -539,7 +499,8 @@ def start_worker(bot_token: str, bot_username: str):
                             name=g["name"],
                             code=g["id"],
                             bot=bot_username
-                        )
+                        ),
+                        reply_markup=main_menu_keyboard(is_admin=True)
                     )
                 except Exception as e:
                     logger.exception("Error creating game: %s", e)
@@ -574,7 +535,10 @@ def start_worker(bot_token: str, bot_username: str):
                 except Exception as e:
                     logger.exception("Error processing update: %s", e)
                 finally:
-                    update_queue.task_done()
+                    try:
+                        update_queue.task_done()
+                    except Exception:
+                        pass
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -583,7 +547,15 @@ def start_worker(bot_token: str, bot_username: str):
         try:
             loop.run_forever()
         finally:
-            loop.run_until_complete(bot.session.close())
+            # корректное закрытие сессии бота
+            try:
+                loop.run_until_complete(bot.get_session())
+            except Exception:
+                pass
+            try:
+                loop.run_until_complete(bot.session.close())
+            except Exception:
+                pass
 
     # Запускаем воркер в отдельном потоке
     thread = threading.Thread(target=worker, daemon=True)
