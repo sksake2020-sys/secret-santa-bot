@@ -1,5 +1,5 @@
 # app/worker.py
-# Aiogram background worker: обрабатывает команды Telegram-бота (HTML + UX-редизайн)
+# Aiogram background worker: обрабатывает команды Telegram-бота (HTML + UX)
 
 import asyncio
 import logging
@@ -78,10 +78,14 @@ def start_worker(bot_token: str, bot_username: str):
             args = message.get_args()
             if args and args.startswith("join_"):
                 code = args.replace("join_", "").upper()
+                tg_username = (message.from_user.username or "").strip() or None
+                full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or tg_username or str(message.from_user.id)
+
                 ok, res = GameManager.join_game(
                     code,
                     message.from_user.id,
-                    message.from_user.first_name or message.from_user.username or str(message.from_user.id)
+                    tg_username,
+                    full_name
                 )
                 if ok:
                     await bot.send_message(
@@ -122,10 +126,14 @@ def start_worker(bot_token: str, bot_username: str):
                 return
 
             code = parts[1].upper()
+            tg_username = (message.from_user.username or "").strip() or None
+            full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or tg_username or str(message.from_user.id)
+
             ok, res = GameManager.join_game(
                 code,
                 message.from_user.id,
-                message.from_user.first_name or message.from_user.username or str(message.from_user.id)
+                tg_username,
+                full_name
             )
             await bot.send_message(message.chat.id, res)
             asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
@@ -186,6 +194,7 @@ def start_worker(bot_token: str, bot_username: str):
                 db.close()
 
             asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
+
         @dp.message_handler(commands=['finishgame'])
         async def cmd_finishgame(message: types.Message):
             db = SessionLocal()
@@ -489,10 +498,11 @@ def start_worker(bot_token: str, bot_username: str):
                     await bot.send_message(message.chat.id, "❌ Название не может быть пустым.")
                     return
 
-                creator_name = message.from_user.first_name or message.from_user.username or str(uid)
+                creator_tg = (message.from_user.username or "").strip() or None
+                creator_full = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or creator_tg or str(uid)
 
                 try:
-                    g = GameManager.create_game(uid, creator_name, game_name)
+                    g = GameManager.create_game(uid, creator_full, game_name, creator_tg)
                     await bot.send_message(
                         message.chat.id,
                         MESSAGES["game_created"].format(
