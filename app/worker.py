@@ -1,5 +1,5 @@
 # app/worker.py
-# Aiogram background worker: обрабатывает команды Telegram-бота (HTML-версия)
+# Aiogram background worker: обрабатывает команды Telegram-бота (HTML + UX-редизайн)
 
 import asyncio
 import logging
@@ -7,6 +7,7 @@ import queue
 import threading
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.manager import GameManager
 from app.messages import MESSAGES
@@ -30,10 +31,48 @@ def start_worker(bot_token: str, bot_username: str):
         bot = Bot(token=bot_token, parse_mode="HTML")
         dp = Dispatcher(bot, storage=MemoryStorage())
 
+        # -------------------- Вспомогательные функции --------------------
+
+        def main_menu_keyboard(is_admin: bool = False):
+            kb = InlineKeyboardMarkup(row_width=2)
+            kb.add(
+                InlineKeyboardButton("🆕 Создать игру", callback_data="menu_newgame"),
+                InlineKeyboardButton("🎯 Мои получатели", callback_data="menu_mytargets"),
+            )
+            kb.add(
+                InlineKeyboardButton("📋 Мои игры", callback_data="menu_mygames"),
+                InlineKeyboardButton("👥 Участники", callback_data="menu_players"),
+            )
+            kb.add(
+                InlineKeyboardButton("ℹ️ Статус", callback_data="menu_status"),
+                InlineKeyboardButton("❓ Помощь", callback_data="menu_help"),
+            )
+            if is_admin:
+                kb.add(
+                    InlineKeyboardButton("🎲 Запустить жеребьёвку", callback_data="menu_startgame"),
+                    InlineKeyboardButton("🏁 Завершить игру", callback_data="menu_finishgame"),
+                )
+            return kb
+
+        async def delete_command_later(chat_id: int, message_id: int, delay: float = 2.0):
+            await asyncio.sleep(delay)
+            try:
+                await bot.delete_message(chat_id, message_id)
+            except Exception:
+                pass
+
         # -------------------- Команды --------------------
 
         @dp.message_handler(commands=['start'])
         async def cmd_start(message: types.Message):
+            is_admin = False
+            # Простая эвристика: если он админ хотя бы одной игры
+            db = SessionLocal()
+            try:
+                is_admin = db.query(Game).filter(Game.admin_id == message.from_user.id, Game.is_active == True).count() > 0
+            finally:
+                db.close()
+
             args = message.get_args()
             if args and args.startswith("join_"):
                 code = args.replace("join_", "").upper()
@@ -43,35 +82,44 @@ def start_worker(bot_token: str, bot_username: str):
                     message.from_user.first_name or message.from_user.username or str(message.from_user.id)
                 )
                 if ok:
-                    g = GameManager.get_game_info(code)
                     await bot.send_message(
                         message.chat.id,
-                        MESSAGES["joined_game"].format(name=g['name'], code=code)
+                        MESSAGES["joined_game"],
+                        reply_markup=main_menu_keyboard(is_admin=is_admin)
                     )
                 else:
-                    await bot.send_message(message.chat.id, res)
+                    await bot.send_message(message.chat.id, res, reply_markup=main_menu_keyboard(is_admin=is_admin))
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
-            await bot.send_message(message.chat.id, MESSAGES["start_welcome"])
+            await bot.send_message(
+                message.chat.id,
+                MESSAGES["start_welcome"],
+                reply_markup=main_menu_keyboard(is_admin=is_admin)
+            )
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['help'])
         async def cmd_help(message: types.Message):
             await bot.send_message(
                 message.chat.id,
-                MESSAGES["help"].format(bot=bot_username)
+                MESSAGES["help"]
             )
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['newgame'])
         async def cmd_newgame(message: types.Message):
             uid = message.from_user.id
             pending_new_game.add(uid)
             await bot.send_message(message.chat.id, MESSAGES["newgame_prompt"])
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['join'])
         async def cmd_join(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
                 await bot.send_message(message.chat.id, "❌ Укажите код: <b>/join ABC123XY</b>")
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             code = parts[1].upper()
@@ -81,6 +129,7 @@ def start_worker(bot_token: str, bot_username: str):
                 message.from_user.first_name or message.from_user.username or str(message.from_user.id)
             )
             await bot.send_message(message.chat.id, res)
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['startgame'])
         async def cmd_startgame(message: types.Message):
@@ -94,6 +143,7 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game:
                     await bot.send_message(message.chat.id, "❌ У вас нет игр, которые можно запустить.")
+                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 ok, res = GameManager.start_game(game.id, message.from_user.id)
@@ -125,7 +175,8 @@ def start_worker(bot_token: str, bot_username: str):
                             await bot.send_message(
                                 p.user_id,
                                 MESSAGES["startgame_notify"].format(
-                                    name=display,
+                                    game_name=game.name,
+                                    display=display,
                                     wishlist=wishlist
                                 )
                             )
@@ -134,6 +185,8 @@ def start_worker(bot_token: str, bot_username: str):
 
             finally:
                 db.close()
+
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['finishgame'])
         async def cmd_finishgame(message: types.Message):
@@ -146,6 +199,7 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game:
                     await bot.send_message(message.chat.id, "❌ У вас нет активных игр.")
+                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 ok, res = GameManager.finish_game(game.id, message.from_user.id)
@@ -162,11 +216,13 @@ def start_worker(bot_token: str, bot_username: str):
                                 p.user_id,
                                 MESSAGES["finishgame"].format(name=game.name)
                             )
-                        except:
+                        except Exception:
                             pass
 
             finally:
                 db.close()
+
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['wish'])
         async def cmd_wish(message: types.Message):
@@ -175,10 +231,12 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not wishlist:
                 await bot.send_message(message.chat.id, "📝 Укажите пожелания: <b>/wish Хочу книгу</b>")
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             ok, res = GameManager.set_wishlist(message.from_user.id, wishlist)
             await bot.send_message(message.chat.id, res)
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['mytargets', 'mytarget'])
         async def cmd_mytargets(message: types.Message):
@@ -186,6 +244,7 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not results:
                 await bot.send_message(message.chat.id, "📭 У вас пока нет активных назначений.")
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             lines = []
@@ -197,21 +256,23 @@ def start_worker(bot_token: str, bot_username: str):
                     continue
 
                 display = r.get("target_username") or r.get("target_full_name") or str(r["target_id"])
+                wishlist = r.get("target_wishlist") or "Пожелания не указаны"
 
                 if username_is_valid_for_link(r.get("target_username")):
                     lines.append(
-                        f"<b>Игра:</b> {r['game_name']}<br>"
-                        f"Получатель: <a href=\"https://t.me/{r['target_username']}\">{display}</a><br>"
-                        f"Пожелания: {r['target_wishlist']}"
+                        f"<b>Игра:</b> {r['game_name']}\n"
+                        f"<b>Получатель:</b> <a href=\"https://t.me/{r['target_username']}\">{display}</a>\n"
+                        f"<b>Пожелания:</b> {wishlist}"
                     )
                 else:
                     lines.append(
-                        f"<b>Игра:</b> {r['game_name']}<br>"
-                        f"Получатель: {display}<br>"
-                        f"Пожелания: {r['target_wishlist']}"
+                        f"<b>Игра:</b> {r['game_name']}\n"
+                        f"<b>Получатель:</b> {display}\n"
+                        f"<b>Пожелания:</b> {wishlist}"
                     )
 
-            await bot.send_message(message.chat.id, "<br><br>".join(lines))
+            await bot.send_message(message.chat.id, "\n\n".join(lines))
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['mygames'])
         async def cmd_mygames(message: types.Message):
@@ -225,6 +286,7 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not game_ids:
                     await bot.send_message(message.chat.id, "📭 У вас пока нет игр.")
+                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 lines = []
@@ -242,18 +304,26 @@ def start_worker(bot_token: str, bot_username: str):
                         ("Ожидание" if g.is_active else "Завершена")
                     )
 
-                    lines.append(f"• <b>{g.name}</b> (код: <code>{g.id}</code>, статус: {status}) — {count} участников")
+                    lines.append(
+                        f"• <b>{g.name}</b>\n"
+                        f"  Код: <code>{g.id}</code>\n"
+                        f"  Статус: {status}\n"
+                        f"  Участников: {count}"
+                    )
 
-                await bot.send_message(message.chat.id, "<b>📋 Ваши игры:</b><br>" + "<br>".join(lines))
+                await bot.send_message(message.chat.id, "<b>📋 Ваши игры:</b>\n\n" + "\n\n".join(lines))
 
             finally:
                 db.close()
+
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['gameinfo'])
         async def cmd_gameinfo(message: types.Message):
             parts = message.text.strip().split()
             if len(parts) < 2:
                 await bot.send_message(message.chat.id, "❌ Укажите код: <b>/gameinfo ABC123XY</b>")
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             code = parts[1].upper()
@@ -261,6 +331,7 @@ def start_worker(bot_token: str, bot_username: str):
 
             if not info:
                 await bot.send_message(message.chat.id, f"❌ Игра с кодом <code>{code}</code> не найдена")
+                asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                 return
 
             status_map = {
@@ -281,7 +352,7 @@ def start_worker(bot_token: str, bot_username: str):
                     else:
                         extra_lines.append(f"• {uname} {mark}")
 
-                extra = "<br>".join(extra_lines)
+                extra = "\n".join(extra_lines)
 
             await bot.send_message(
                 message.chat.id,
@@ -297,6 +368,8 @@ def start_worker(bot_token: str, bot_username: str):
                 )
             )
 
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
+
         @dp.message_handler(commands=['players'])
         async def cmd_players(message: types.Message):
             db = SessionLocal()
@@ -307,11 +380,13 @@ def start_worker(bot_token: str, bot_username: str):
 
                 if not p:
                     await bot.send_message(message.chat.id, "❌ Вы не участвуете в игре.")
+                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 g = db.query(Game).filter(Game.id == p.game_id).first()
                 if not g:
                     await bot.send_message(message.chat.id, "❌ Игра не найдена.")
+                    asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
                     return
 
                 participants = db.query(Participant).filter(
@@ -333,11 +408,13 @@ def start_worker(bot_token: str, bot_username: str):
 
                 await bot.send_message(
                     message.chat.id,
-                    f"<b>Участники игры {g.name}:</b><br>" + "<br>".join(lines)
+                    MESSAGES["participants_header"].format(name=g.name) + "\n" + "\n".join(lines)
                 )
 
             finally:
                 db.close()
+
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
 
         @dp.message_handler(commands=['status'])
         async def cmd_status(message: types.Message):
@@ -362,6 +439,79 @@ def start_worker(bot_token: str, bot_username: str):
                 )
             finally:
                 db.close()
+
+            asyncio.create_task(delete_command_later(message.chat.id, message.message_id))
+
+        # -------------------- Callback-кнопки меню --------------------
+
+        @dp.callback_query_handler(lambda c: c.data and c.data.startswith("menu_"))
+        async def menu_callbacks(callback_query: types.CallbackQuery):
+            data = callback_query.data
+            uid = callback_query.from_user.id
+            chat_id = callback_query.message.chat.id
+
+            if data == "menu_help":
+                await bot.send_message(chat_id, MESSAGES["help"])
+            elif data == "menu_newgame":
+                pending_new_game.add(uid)
+                await bot.send_message(chat_id, MESSAGES["newgame_prompt"])
+            elif data == "menu_mytargets":
+                # Переиспользуем логику команды /mytargets
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/mytargets"
+                )
+                await cmd_mytargets(msg)
+            elif data == "menu_mygames":
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/mygames"
+                )
+                await cmd_mygames(msg)
+            elif data == "menu_players":
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/players"
+                )
+                await cmd_players(msg)
+            elif data == "menu_status":
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/status"
+                )
+                await cmd_status(msg)
+            elif data == "menu_startgame":
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/startgame"
+                )
+                await cmd_startgame(msg)
+            elif data == "menu_finishgame":
+                msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=callback_query.message.date,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/finishgame"
+                )
+                await cmd_finishgame(msg)
+
+            await bot.answer_callback_query(callback_query.id)
 
         # -------------------- Обработка текста --------------------
 
@@ -388,7 +538,7 @@ def start_worker(bot_token: str, bot_username: str):
                         MESSAGES["game_created"].format(
                             name=g["name"],
                             code=g["id"],
-                            link=g["invite_link"]
+                            bot=bot_username
                         )
                     )
                 except Exception as e:
@@ -400,7 +550,7 @@ def start_worker(bot_token: str, bot_username: str):
             if len(text) == 8 and text.isalnum():
                 await bot.send_message(
                     message.chat.id,
-                    f"🔍 Похоже на код игры.<br>"
+                    f"🔍 Похоже на код игры.\n"
                     f"Присоединиться: https://t.me/{bot_username}?start=join_{text.upper()}"
                 )
                 return
