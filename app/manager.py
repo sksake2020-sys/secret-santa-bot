@@ -20,7 +20,8 @@ class GameManager:
         db = SessionLocal()
         try:
             game_id = generate_game_id()
-            invite_link = f"https://t.me/TODO_BOT_USERNAME?start=join_{game_id}"
+            # invite_link формируем как шаблон; worker подставит реальный bot_username
+            invite_link = f"https://t.me/REPLACE_WITH_BOT_USERNAME?start=join_{game_id}"
 
             game = Game(
                 id=game_id,
@@ -103,7 +104,7 @@ class GameManager:
 
     @staticmethod
     def start_game(game_id: str, creator_id: int):
-        """Запускает жеребьёвку."""
+        """Запускает жеребьёвку и сохраняет назначения в БД."""
         db = SessionLocal()
         try:
             game = db.query(Game).filter(Game.id == game_id).first()
@@ -123,22 +124,56 @@ class GameManager:
             if len(participants) < 2:
                 return False, "🎁 Нужно минимум 2 участника"
 
+            # Собираем список user_id и перемешиваем
             user_ids = [p.user_id for p in participants]
             random.shuffle(user_ids)
 
-            # круговая жеребьёвка
-            for i, giver in enumerate(user_ids):
-                receiver = user_ids[(i + 1) % len(user_ids)]
+            # Назначаем круговую жеребьёвку: giver -> next user
+            assignments = []
+            for i, giver_id in enumerate(user_ids):
+                receiver_id = user_ids[(i + 1) % len(user_ids)]
                 giver_rec = db.query(Participant).filter(
                     Participant.game_id == game_id,
-                    Participant.user_id == giver
+                    Participant.user_id == giver_id
                 ).first()
-                giver_rec.target_id = receiver
 
+                if not giver_rec:
+                    logger.warning("start_game: participant not found giver=%s game=%s", giver_id, game_id)
+                    continue
+
+                # Присваиваем target_id
+                giver_rec.target_id = receiver_id
+
+                # Попробуем заполнить дополнительные поля, если они есть в модели
+                receiver_part = db.query(Participant).filter(
+                    Participant.game_id == game_id,
+                    Participant.user_id == receiver_id
+                ).first()
+                if receiver_part:
+                    # если в модели есть поля target_username/target_full_name — заполним их
+                    if hasattr(giver_rec, "target_username"):
+                        try:
+                            giver_rec.target_username = receiver_part.username
+                        except Exception:
+                            pass
+                    if hasattr(giver_rec, "target_full_name"):
+                        try:
+                            giver_rec.target_full_name = receiver_part.full_name
+                        except Exception:
+                            pass
+
+                assignments.append((giver_id, receiver_id))
+
+            # Помечаем игру как начатую
             game.is_started = True
             game.started_at = datetime.utcnow()
 
             db.commit()
+
+            # Логируем все пары для отладки и мониторинга
+            for giver_id, receiver_id in assignments:
+                logger.info("pair_assigned: game=%s santa=%s receiver=%s", game_id, giver_id, receiver_id)
+
             logger.info("game_started: %s", game_id)
             return True, "🎄 Игра началась! Тайные Санты распределены 🎅"
 
@@ -236,6 +271,14 @@ class GameManager:
                     Participant.game_id == p.game_id,
                     Participant.user_id == p.target_id
                 ).first()
+
+                if not target:
+                    results.append({
+                        "game_id": p.game_id,
+                        "game_name": game.name,
+                        "target_id": None
+                    })
+                    continue
 
                 results.append({
                     "game_id": p.game_id,
