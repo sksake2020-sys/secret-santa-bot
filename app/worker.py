@@ -1,10 +1,15 @@
 # app/worker.py
 # Aiogram background worker: обрабатывает команды Telegram-бота (HTML + UX)
+# Исправлена работа с сессиями SQLAlchemy, обработка callback'ов, логирование неудачных DM,
+# и устранены DetachedInstanceError и проблемы с датой в fake Message.
 
 import asyncio
 import logging
 import queue
 import threading
+from datetime import datetime as _dt
+from typing import Optional
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -22,6 +27,18 @@ update_queue = queue.Queue()
 
 # Пользователи, ожидающие ввода названия игры
 pending_new_game = set()
+
+
+def _safe_message_date_to_int(msg_date) -> int:
+    """Преобразует поле date из message в int timestamp безопасно."""
+    if msg_date is None:
+        return int(_dt.utcnow().timestamp())
+    if isinstance(msg_date, _dt):
+        return int(msg_date.timestamp())
+    try:
+        return int(msg_date)
+    except Exception:
+        return int(_dt.utcnow().timestamp())
 
 
 def start_worker(bot_token: str, bot_username: str):
@@ -139,42 +156,72 @@ def start_worker(bot_token: str, bot_username: str):
                     await bot.send_message(message.chat.id, "❌ У вас нет игр, которые можно запустить.")
                     return
 
-                ok, res = GameManager.start_game(game.id, message.from_user.id)
+                # Сохраняем простые значения, чтобы не обращаться к detached-объекту позже
+                game_id = game.id
+                game_name = game.name
+
+                ok, res = GameManager.start_game(game_id, message.from_user.id)
                 await bot.send_message(message.chat.id, res)
 
                 if ok:
                     await bot.send_message(message.chat.id, MESSAGES["game_started"])
 
-                    participants = db.query(Participant).filter(
-                        Participant.game_id == game.id
-                    ).all()
+                    # Открываем новую сессию для рассылки — не используем старый объект game
+                    db2 = SessionLocal()
+                    failed = []
+                    try:
+                        participants = db2.query(Participant).filter(
+                            Participant.game_id == game_id
+                        ).all()
 
-                    for p in participants:
-                        if not p.target_id:
-                            continue
+                        for p in participants:
+                            # проверяем, что user_id — int
+                            try:
+                                uid = int(p.user_id)
+                            except Exception:
+                                logger.warning("Invalid user_id type for participant id=%s user_id=%s", getattr(p, "id", None), p.user_id)
+                                failed.append((p.user_id, "invalid user_id"))
+                                continue
 
-                        target = db.query(Participant).filter(
-                            Participant.game_id == game.id,
-                            Participant.user_id == p.target_id
-                        ).first()
+                            if not p.target_id:
+                                # если нет target_id — пропускаем
+                                failed.append((uid, "no target assigned"))
+                                continue
 
-                        if not target:
-                            continue
+                            target = db2.query(Participant).filter(
+                                Participant.game_id == game_id,
+                                Participant.user_id == p.target_id
+                            ).first()
 
-                        wishlist = target.wishlist or "Пожелания не указаны"
-                        display = target.username or target.full_name or str(target.user_id)
+                            if not target:
+                                failed.append((uid, "target not found"))
+                                continue
 
-                        try:
-                            await bot.send_message(
-                                p.user_id,
-                                MESSAGES["startgame_notify"].format(
-                                    game_name=game.name,
-                                    display=display,
-                                    wishlist=wishlist
+                            wishlist = target.wishlist or "Пожелания не указаны"
+                            display = target.username or target.full_name or str(target.user_id)
+
+                            try:
+                                await bot.send_message(
+                                    uid,
+                                    MESSAGES["startgame_notify"].format(
+                                        game_name=game_name,
+                                        display=display,
+                                        wishlist=wishlist
+                                    )
                                 )
-                            )
-                        except Exception as e:
-                            logger.exception("Failed to send DM: %s", e)
+                                logger.info("notify_sent: game=%s to=%s receiver=%s", game_id, uid, target.user_id)
+                            except Exception as e:
+                                logger.exception("Failed to send DM to %s: %s", uid, e)
+                                failed.append((uid, str(e)))
+                    finally:
+                        db2.close()
+
+                    # Если были неудачные отправки — уведомляем создателя в чате
+                    if failed:
+                        text_lines = ["<b>⚠️ Некоторым участникам не удалось отправить личные сообщения:</b>"]
+                        for uid, reason in failed:
+                            text_lines.append(f"- {uid}: {reason}")
+                        await bot.send_message(message.chat.id, "\n".join(text_lines))
 
             finally:
                 db.close()
@@ -419,31 +466,76 @@ def start_worker(bot_token: str, bot_username: str):
         @dp.callback_query_handler(lambda c: c.data and c.data.startswith("menu_"))
         async def menu_callbacks(callback_query: types.CallbackQuery):
             data = callback_query.data
+            uid = callback_query.from_user.id
+            chat_id = callback_query.message.chat.id
+            msg_date_int = _safe_message_date_to_int(callback_query.message.date)
 
             if data == "menu_help":
-                await bot.send_message(callback_query.message.chat.id, MESSAGES["help"])
+                await bot.send_message(chat_id, MESSAGES["help"])
 
             elif data == "menu_newgame":
-                pending_new_game.add(callback_query.from_user.id)
-                await bot.send_message(callback_query.message.chat.id, MESSAGES["newgame_prompt"])
+                pending_new_game.add(uid)
+                await bot.send_message(chat_id, MESSAGES["newgame_prompt"])
 
             elif data == "menu_mytargets":
-                await cmd_mytargets(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/mytargets"
+                )
+                await cmd_mytargets(fake_msg)
 
             elif data == "menu_mygames":
-                await cmd_mygames(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/mygames"
+                )
+                await cmd_mygames(fake_msg)
 
             elif data == "menu_players":
-                await cmd_players(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/players"
+                )
+                await cmd_players(fake_msg)
 
             elif data == "menu_status":
-                await cmd_status(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/status"
+                )
+                await cmd_status(fake_msg)
 
             elif data == "menu_startgame":
-                await cmd_startgame(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/startgame"
+                )
+                await cmd_startgame(fake_msg)
 
             elif data == "menu_finishgame":
-                await cmd_finishgame(callback_query.message)
+                fake_msg = types.Message(
+                    message_id=callback_query.message.message_id,
+                    date=msg_date_int,
+                    chat=callback_query.message.chat,
+                    from_user=callback_query.from_user,
+                    text="/finishgame"
+                )
+                await cmd_finishgame(fake_msg)
 
             await bot.answer_callback_query(callback_query.id)
 
@@ -467,6 +559,17 @@ def start_worker(bot_token: str, bot_username: str):
 
                 try:
                     g = GameManager.create_game(uid, creator_full, game_name, creator_tg)
+                    # проверка, что участник создан
+                    db = SessionLocal()
+                    try:
+                        exists = db.query(Participant).filter(Participant.game_id == g["id"], Participant.user_id == uid).first()
+                        if not exists:
+                            logger.warning("After create_game participant missing for game=%s user=%s", g["id"], uid)
+                        else:
+                            logger.info("Participant created OK for game=%s user=%s", g["id"], uid)
+                    finally:
+                        db.close()
+
                     await bot.send_message(
                         message.chat.id,
                         MESSAGES["game_created"].format(
